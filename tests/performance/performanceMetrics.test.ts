@@ -51,6 +51,20 @@ describe('performance metrics', () => {
     ]);
   });
 
+  it('does not eagerly allocate a potentially large logical capacity', () => {
+    // Constructing Array(Number.MAX_SAFE_INTEGER) throws, so reaching the snapshot proves
+    // capacity remains a logical bound and storage grows only when samples are recorded.
+    const capture = createPerformanceSampler({
+      capacity: Number.MAX_SAFE_INTEGER,
+      clock: { now: () => 10 },
+    });
+
+    capture.recordFrame(16, 1);
+    expect(capture.snapshot(environment).samples).toEqual([
+      { timestampMs: 10, frameMs: 16, renderBudgetScale: 1 },
+    ]);
+  });
+
   it('uses ascending nearest-rank frame percentiles and derives effective FPS', () => {
     const { sampler: capture } = sampler();
     [40, 10, 30, 20].forEach((frameMs) => capture.recordFrame(frameMs, 1));

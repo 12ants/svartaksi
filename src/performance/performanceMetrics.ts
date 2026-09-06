@@ -97,7 +97,9 @@ export function createPerformanceSampler({ capacity, clock = defaultClock }: Per
     throw new RangeError('capacity must be a positive safe integer');
   }
 
-  let slots = new Array<PerformanceSample>(capacity);
+  // Grow storage with recorded samples instead of allocating the entire logical capacity.
+  // Indexed writes retain O(1) ring replacement without rejecting large safe capacities.
+  let slots: PerformanceSample[] = [];
   let writeIndex = 0;
   let count = 0;
   let startedAtMs: number | null = null;
@@ -135,7 +137,7 @@ export function createPerformanceSampler({ capacity, clock = defaultClock }: Per
       count = Math.min(count + 1, capacity);
     },
     reset() {
-      slots = new Array<PerformanceSample>(capacity);
+      slots = [];
       writeIndex = 0;
       count = 0;
       startedAtMs = null;
