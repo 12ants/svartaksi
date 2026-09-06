@@ -24,11 +24,14 @@ Use focused unit tests, then `pnpm test:all` and `pnpm build` after each impleme
 `src/world/buildScheduler.ts`. Create `docs/performance/2026-09-06-baseline.md`
 and store raw JSON under `docs/performance/captures/` when actual runs exist.
 
-- [ ] Run `pnpm test -- tests/performance tests/world/buildScheduler.test.ts` and record results without treating test timings as a game benchmark.
-- [ ] Run `pnpm build`, then `pnpm exec vite preview --host 127.0.0.1 --port 7777`. Open `http://localhost:7777/?perfCapture=1` on the target device. Verify world data loads in preview; do not substitute a different build mode between runs.
-- [ ] Record revision (`git rev-parse HEAD`), dirty diff, browser/GPU, verified hardware/software/unknown backend, power mode, viewport, DPR, quality options, location/heading, time of day, cache state, and camera mode. Keep cold-cache startup separate from warm steady-state runs.
-- [ ] Define three repeatable manual scenarios: stationary exterior view after the intro; the same bus route segment; and driving across the same world-stream boundary. Record exact starting coordinates and route landmarks from the actual run before comparison.
-- [ ] Wait for the runtime and initial world/intro completion, warm up for 20 seconds, then capture 10 seconds of foreground play. In DevTools use:
+- [x] Run `pnpm test -- tests/performance tests/world/buildScheduler.test.ts` and record results without treating test timings as a game benchmark.
+  **Result 2026-09-06:** 4 files, 27 tests, all passing. Recorded in [the baseline](../performance/2026-09-06-baseline.md#what-was-run) as a suite result and explicitly not as a benchmark.
+- [ ] **UNVERIFIED — no target browser.** Run `pnpm build`, then `pnpm exec vite preview --host 127.0.0.1 --port 7777`. Open `http://localhost:7777/?perfCapture=1` on the target device. Verify world data loads in preview; do not substitute a different build mode between runs.
+  **2026-09-06:** `pnpm build` passes; the implementation worktree is headless with no chromium/chrome/firefox on `PATH`, and no automation was added. Protocol written up in the baseline document; no run performed.
+- [ ] **UNVERIFIED — depends on a run.** Metadata contract written up in the baseline document. Record revision (`git rev-parse HEAD`), dirty diff, browser/GPU, verified hardware/software/unknown backend, power mode, viewport, DPR, quality options, location/heading, time of day, cache state, and camera mode. Keep cold-cache startup separate from warm steady-state runs.
+- [x] Define three repeatable manual scenarios: stationary exterior view after the intro; the same bus route segment; and driving across the same world-stream boundary. Record exact starting coordinates and route landmarks from the actual run before comparison.
+  **Result 2026-09-06:** `stationary-exterior`, `bus-route-segment`, `stream-boundary-drive` defined in the baseline document. Coordinates and landmarks are marked as placeholders to be pinned on the first real run — **UNVERIFIED** and deliberately not invented.
+- [ ] **UNVERIFIED — depends on a run.** Wait for the runtime and initial world/intro completion, warm up for 20 seconds, then capture 10 seconds of foreground play. In DevTools use:
 
 ```js
 const bridge = window.__SVARTAKSI_PERFORMANCE__;
@@ -41,14 +44,19 @@ const raw = await bridge.stop();
 copy(JSON.stringify(raw, null, 2)); // DevTools clipboard helper, not application code.
 ```
 
-- [ ] Preserve raw JSON unchanged and store corrected run metadata in the baseline Markdown or a sidecar JSON. Runtime defaults (`runtime`, `runtime-debug`, zero durations, unknown renderer kind) are not verified metadata. Inspect timestamps for focus/console pauses; reject contaminated runs rather than silently dropping their worst frames.
-- [ ] The sampler retains 1,800 frames, not a guaranteed time window. Verify sample timestamps cover the intended duration. At unusually high refresh rates shorten the scenario or explicitly increase capacity for both baseline and candidate. Never label a truncated ring snapshot as a full 30-second run.
-- [ ] Summarize p50/p95/p99 frame milliseconds using existing nearest-rank semantics, counts over 25/50 ms, render-budget scale range, renderer calls/triangles/geometries/textures, and scheduler worst slice/histogram. Renderer/build snapshots are latest values, not per-frame histories or peak counters; scheduler data is for the current/latest job only.
-- [ ] Run each scenario three times. Use a separate DevTools allocation/CPU trace to choose the next candidate; profiling overhead must not contaminate the comparative frame captures.
+- [x] Preserve raw JSON unchanged and store corrected run metadata in the baseline Markdown or a sidecar JSON.
+  **Result 2026-09-06:** ruled as documentation, not a code change — `captureContext()` is left untouched and the placeholder fields are tabulated in the baseline. `docs/performance/captures/README.md` fixes the naming and the never-edit-an-export rule. Runtime defaults (`runtime`, `runtime-debug`, zero durations, unknown renderer kind) are not verified metadata. Inspect timestamps for focus/console pauses; reject contaminated runs rather than silently dropping their worst frames.
+- [x] The sampler retains 1,800 frames, not a guaranteed time window. **Documented in the baseline** (capacity section), including that `startedAtMs` survives eviction and is therefore the tell for a truncated ring. Verify sample timestamps cover the intended duration. At unusually high refresh rates shorten the scenario or explicitly increase capacity for both baseline and candidate. Never label a truncated ring snapshot as a full 30-second run.
+- [ ] **UNVERIFIED — depends on a run.** The statistic list and the latest-value/current-job caveats are written up in the baseline. Summarize p50/p95/p99 frame milliseconds using existing nearest-rank semantics, counts over 25/50 ms, render-budget scale range, renderer calls/triangles/geometries/textures, and scheduler worst slice/histogram. Renderer/build snapshots are latest values, not per-frame histories or peak counters; scheduler data is for the current/latest job only.
+- [ ] **UNVERIFIED — depends on a run.** Run each scenario three times. Use a separate DevTools allocation/CPU trace to choose the next candidate; profiling overhead must not contaminate the comparative frame captures.
 
 **Acceptance:** Three comparable runs per scenario, truthful metadata and renderer classification,
 raw exports retained. If hardware is unavailable, mark this task unverified; proceed only
 with structural correctness work and make no hardware performance claims.
+
+**Status 2026-09-06: UNVERIFIED.** Zero runs captured; hardware was unavailable and the
+fallback clause was taken. See [`docs/performance/2026-09-06-baseline.md`](../performance/2026-09-06-baseline.md).
+No candidate in this plan has hardware evidence, and none is claimed to.
 
 ## Task 2: Slice remaining placement loops when streaming evidence warrants it
 
@@ -95,7 +103,9 @@ if (++operations % 256 === 0) yield;
 **Scope:** Capture overhead only. `recordFrame` already returns immediately when capture
 is inactive; do not claim an ordinary gameplay optimization.
 
-- [ ] Add wraparound/reset/isolation tests in the existing suite using its `environment` fixture. Preserve the existing meaning of `startedAtMs` as capture start even when early samples are evicted.
+- [x] Add wraparound/reset/isolation tests in the existing suite using its `environment` fixture. Preserve the existing meaning of `startedAtMs` as capture start even when early samples are evicted.
+
+  **Result 2026-09-06:** `performanceMetrics.test.ts` now covers multiple wraps, chronological snapshots, the original capture start, reset, and snapshot mutation isolation.
 
 ```ts
 const capture = createPerformanceSampler({ capacity: 2, clock: { now: () => 10 } });
@@ -108,7 +118,7 @@ capture.reset();
 expect(capture.snapshot(environment).samples).toEqual([]);
 ```
 
-- [ ] Replace push/shift storage with a fixed-capacity array, write index, and count. Insert in O(1); allocate ordered copies only when snapshot/report is requested.
+- [x] Replace push/shift storage with a fixed-capacity array, write index, and count. Insert in O(1); allocate ordered copies only when snapshot/report is requested.
 
 ```ts
 const slots = new Array<PerformanceSample>(capacity);
@@ -121,9 +131,13 @@ count = Math.min(count + 1, capacity);
 // Snapshot order: (writeIndex - count + capacity + i) % capacity, i in [0, count).
 ```
 
-- [ ] Reset indices, count, and start time. Read the newest timestamp through the ring index. Keep deep-enough snapshot isolation, validation, percentile semantics, and JSON schema identical.
-- [ ] Existing functional tests may already pass before this optimization; use source inspection or an isolated insertion microbenchmark to establish removal of linear shifting. Do not add flaky timing thresholds to Vitest or pretend a behavior-preserving change must fail a functional test first.
-- [ ] Run `pnpm test -- tests/performance`, `pnpm test:all`, and `pnpm build`; commit as `perf: use circular storage for capture samples`.
+- [x] Reset indices, count, and start time. Read the newest timestamp through the ring index. Keep deep-enough snapshot isolation, validation, percentile semantics, and JSON schema identical.
+- [x] Existing functional tests may already pass before this optimization; use source inspection or an isolated insertion microbenchmark to establish removal of linear shifting. Do not add flaky timing thresholds to Vitest or pretend a behavior-preserving change must fail a functional test first.
+
+  **Result 2026-09-06:** source inspection confirms `recordFrame` now performs one indexed assignment and constant-time index/count updates; the former `samples.shift()` is absent. Ordered cloning happens only in snapshot/report paths. No timing threshold was added.
+- [x] Run `pnpm test -- tests/performance`, `pnpm test:all`, and `pnpm build`; commit as `perf: use circular storage for capture samples`.
+
+  **Result 2026-09-06:** 17 focused performance tests passed; repository validation passed with 144 test files and 1,458 tests, and the production build succeeded. The existing large-chunk warning remains. This reduces overhead only while capture is active; no gameplay FPS claim is made.
 
 ## Task 4: Conditional allocation and visibility work
 

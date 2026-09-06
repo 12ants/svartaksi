@@ -22,6 +22,49 @@ describe('performance metrics', () => {
     ]);
   });
 
+  it('preserves chronological order and the original start time across repeated wraps', () => {
+    const { sampler: capture } = sampler(2);
+    [1, 2, 3, 4, 5].forEach((frameMs) => capture.recordFrame(frameMs, 1));
+
+    expect(capture.snapshot(environment)).toMatchObject({
+      startedAtMs: 10,
+      endedAtMs: 50,
+      samples: [
+        { timestampMs: 40, frameMs: 4, renderBudgetScale: 1 },
+        { timestampMs: 50, frameMs: 5, renderBudgetScale: 1 },
+      ],
+    });
+  });
+
+  it('resets wrapped storage and keeps returned samples isolated from later snapshots', () => {
+    const { sampler: capture } = sampler(2);
+    [1, 2, 3].forEach((frameMs) => capture.recordFrame(frameMs, 1));
+    const snapshot = capture.snapshot(environment);
+    snapshot.samples[0].frameMs = 999;
+    expect(capture.snapshot(environment).samples.map((sample) => sample.frameMs)).toEqual([2, 3]);
+
+    capture.reset();
+    expect(capture.snapshot(environment).samples).toEqual([]);
+    capture.recordFrame(4, 0.75);
+    expect(capture.snapshot(environment).samples).toEqual([
+      { timestampMs: 50, frameMs: 4, renderBudgetScale: 0.75 },
+    ]);
+  });
+
+  it('does not eagerly allocate a potentially large logical capacity', () => {
+    // Constructing Array(Number.MAX_SAFE_INTEGER) throws, so reaching the snapshot proves
+    // capacity remains a logical bound and storage grows only when samples are recorded.
+    const capture = createPerformanceSampler({
+      capacity: Number.MAX_SAFE_INTEGER,
+      clock: { now: () => 10 },
+    });
+
+    capture.recordFrame(16, 1);
+    expect(capture.snapshot(environment).samples).toEqual([
+      { timestampMs: 10, frameMs: 16, renderBudgetScale: 1 },
+    ]);
+  });
+
   it('uses ascending nearest-rank frame percentiles and derives effective FPS', () => {
     const { sampler: capture } = sampler();
     [40, 10, 30, 20].forEach((frameMs) => capture.recordFrame(frameMs, 1));

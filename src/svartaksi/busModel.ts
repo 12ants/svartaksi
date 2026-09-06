@@ -2,6 +2,7 @@ import * as THREE from 'three';
 
 import { applyLogDepthBias, DEPTH_BIAS } from '../world/depthBias';
 import { BUS_DIMENSIONS, computeAckermannAngles } from './busGeometry';
+import { updateBusShellWheels, type BusShellWheel, type BusShellWheelState } from './busShellWheels';
 
 /**
  * Chassis constants below are re-exports of BUS_DIMENSIONS rather than independent
@@ -899,12 +900,23 @@ export function createBusModel(): BusModel {
     dispose() {
       if (disposed) return;
       disposed = true;
+      // The modelled shell is owned by whoever loaded it (busShell.ts), which disposes
+      // its geometries and materials itself — including the ones it detached and the
+      // traversal below could not reach. Handing it back before the sweep is what keeps
+      // exactly one owner per resource: two owners walking one tree is how a material
+      // shared with a live mesh gets disposed out from under it.
+      shellBindings.get(model)?.group?.removeFromParent();
       disposeBus(group);
     },
   };
 
   nightLampMaterials.set(model, [markerLampMaterial, tailLampMaterial]);
   doorLeafGroups.set(model, doorLeaves);
+  shellBindings.set(model, {
+    group: null,
+    wheels: [],
+    state: { leftSteer: 0, rightSteer: 0, rollRadians: 0, travel: [] },
+  });
   setBusDoorOpen(model, 0);
   setBusSteer(model, 0);
   return model;
@@ -917,6 +929,25 @@ export function createBusModel(): BusModel {
  */
 const nightLampMaterials = new WeakMap<BusModel, THREE.MeshStandardMaterial[]>();
 const doorLeafGroups = new WeakMap<BusModel, [THREE.Group, THREE.Group]>();
+
+/**
+ * The authored shell's wheels, and the running-gear state the three setters below build
+ * between them.
+ *
+ * The state is kept whether or not a shell has arrived, because the shell arrives a beat
+ * into the session and can arrive mid-ride: `applyBusShell` replays what is here the
+ * moment it lands, so a bus that was already at half lock does not snap its new wheels
+ * straight for a frame.
+ */
+interface BusShellBinding {
+  /** The attached shell's root, or null while the bus is still wearing its own skin.
+   * Held so teardown can hand the shell back to its owner rather than disposing it. */
+  group: THREE.Object3D | null;
+  wheels: readonly BusShellWheel[];
+  state: BusShellWheelState;
+}
+const shellBindings = new WeakMap<BusModel, BusShellBinding>();
+
 
 /**
  * Opens the doors, `fraction` running 0 (shut) to 1 (fully open).
@@ -951,6 +982,14 @@ export function setBusSteer(model: BusModel, angle: number): void {
   const [leftWheel, rightWheel] = model.frontWheels;
   leftWheel.rotation.y = left;
   rightWheel.rotation.y = right;
+  // The authored wheels take the same two angles rather than re-deriving them: one
+  // Ackermann split per frame, and no way for the two sets of wheels to disagree.
+  const binding = shellBindings.get(model);
+  if (binding) {
+    binding.state.leftSteer = left;
+    binding.state.rightSteer = right;
+    updateBusShellWheels(binding.wheels, binding.state);
+  }
   // The rim lies almost flat and faces the driver, so a left lock is a turn the other way
   // about its own axis. Driven off the commanded centre angle, not either wheel's own.
   model.steeringWheel.children[0].rotation.z = -clamped * STEERING_RATIO;
@@ -967,6 +1006,11 @@ export function setBusSteer(model: BusModel, angle: number): void {
  */
 export function setBusWheelRoll(model: BusModel, radians: number): void {
   for (const wheel of model.wheelRoll) wheel.rotation.x = radians;
+  const binding = shellBindings.get(model);
+  if (binding) {
+    binding.state.rollRadians = radians;
+    updateBusShellWheels(binding.wheels, binding.state);
+  }
 }
 
 /**
@@ -994,6 +1038,14 @@ export function setBusWheelTravel(model: BusModel, travel: readonly number[]): v
   for (let index = 0; index < model.wheelRoll.length && index < travel.length; index += 1) {
     const layout = BUS_WHEEL_LAYOUT[index];
     model.wheelRoll[index].position.y = (layout?.front ? 0 : BUS_AXLE_Y) + travel[index];
+  }
+  // The authored wheels read the same array through their own suspensionIndex: the asset
+  // has four wheels where the sheet has six, so each rear one takes the travel of the
+  // outer wheel of its dual pair.
+  const binding = shellBindings.get(model);
+  if (binding) {
+    binding.state.travel = travel;
+    updateBusShellWheels(binding.wheels, binding.state);
   }
 }
 
@@ -1144,9 +1196,18 @@ export function isBusShellPart(name: string): boolean {
  * is the whole of the way back, which is what makes the asset a choice rather than a
  * one-way door.
  */
-export function applyBusShell(model: BusModel, shell: { group: THREE.Object3D }): void {
+export function applyBusShell(
+  model: BusModel, shell: { group: THREE.Object3D; wheels?: readonly BusShellWheel[] },
+): void {
   setProceduralShellVisible(model, false);
   model.group.add(shell.group);
+  const binding = shellBindings.get(model);
+  if (binding) {
+    binding.group = shell.group;
+    binding.wheels = shell.wheels ?? [];
+    // Replay the running gear's current state, since the shell may have landed mid-ride.
+    updateBusShellWheels(binding.wheels, binding.state);
+  }
 }
 
 /** Shows the procedural skin again, for a session that could not load the asset. */
