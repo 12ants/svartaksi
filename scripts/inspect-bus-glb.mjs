@@ -354,6 +354,46 @@ function reportWheelAssignment(rows, scale) {
   const total = perHub.reduce((sum, hub) => sum + hub.triangles, 0);
   const assetTriangles = rows.reduce((sum, row) => sum + row.triangleCount, 0);
   console.log(`wheel triangles ${total} of ${assetTriangles} in the asset`);
+
+  // What the split costs in draw calls. A wheel spans more than one material, so it emits
+  // one mesh per (wheel, source mesh); a source mesh with nothing left is removed.
+  const contributing = new Set(verdicts.inside.map((hit) => hit.row));
+  const emptied = [...contributing].filter((row) => row.components
+    .every((_, index) => verdicts.inside.some((hit) => hit.row === row && hit.index === index)));
+  const drawn = rows.filter((row) => row.material !== 'interior').length;
+  const added = contributing.size * hubs.length;
+  console.log(`draw calls: ${drawn} meshes without the interior, ${emptied.length} emptied by the split, `
+    + `${added} added (${contributing.size} materials x ${hubs.length} wheels) -> `
+    + `${drawn - emptied.length + added} (${added - emptied.length > 0 ? '+' : ''}${added - emptied.length})`);
+  console.log('');
+
+  // How much the cylinders could grow before they claimed something that is not a wheel.
+  // The runtime extraction adds a tolerance to these radii; this is the budget it has.
+  // The slab is widened by the same tolerance, so the number below is the clearance the
+  // runtime actually sees rather than the one an exact cylinder would.
+  const TOLERANCE_PROBE_M = 0.01; // Mirrors HUB_TOLERANCE_M in src/svartaksi/busShellWheels.ts.
+  console.log(`clearance from each cylinder (widened by ${TOLERANCE_PROBE_M} m) to the nearest vertex that is not part of that wheel:`);
+  for (const [hubIndex, hub] of hubs.entries()) {
+    let nearestRadius = Infinity;
+    let nearest = null;
+    for (const row of rows) {
+      if (row.material === 'interior') continue;
+      for (const [index, component] of row.components.entries()) {
+        if (verdicts.inside.some((hit) => hit.row === row && hit.index === index && hit.hubIndex === hubIndex)) continue;
+        for (const triangle of component.triangles) {
+          for (let corner = 0; corner < 3; corner += 1) {
+            const vertex = row.indices[triangle * 3 + corner];
+            const x = row.positions[vertex * 3];
+            if (Math.abs(x - hub.x) > hub.halfWidth + TOLERANCE_PROBE_M) continue; // Beside the wheel, not around it.
+            const radius = Math.hypot(row.positions[vertex * 3 + 1] - hub.y, row.positions[vertex * 3 + 2] - hub.z);
+            if (radius < nearestRadius) { nearestRadius = radius; nearest = `${row.material} [${index}]`; }
+          }
+        }
+      }
+    }
+    console.log(`  [${hubIndex}] radius ${f(hub.radius)} -> nearest foreign vertex at ${f(nearestRadius)}`
+      + `  (clearance ${f(nearestRadius - hub.radius)} m, ${nearest ?? 'nothing in the slab'})`);
+  }
   console.log('');
   console.log('components that reach into a cylinder without being contained (these are NOT the wheel):');
   if (verdicts.straddles.length === 0) console.log('  none');

@@ -151,6 +151,18 @@ The `wheel` material mesh is 3,880 triangles and all four rims account for all o
 after extraction that mesh is empty and is removed from the scene. The `black` mesh keeps
 748 of its 3,956 triangles (lamp housings, side rubbing strips, the front and rear aprons).
 
+### What the split costs in draw calls
+
+```
+draw calls: 14 meshes without the interior, 1 emptied by the split, 8 added (2 materials x 4 wheels) -> 21 (+7)
+```
+
+**Seven more draw calls for the shell.** This is a cost of the wheel animation, not a
+result of any optimisation work, and it is recorded here so it is never confused with one.
+It is a static, countable change; its effect on frame time on the target device is
+**unmeasured** — see the [performance baseline](../performance/2026-09-06-baseline.md),
+which has no hardware run behind it.
+
 ### Nothing straddles a wheel
 
 ```
@@ -159,11 +171,25 @@ components that reach into a cylinder without being contained (these are NOT the
 ```
 
 The one component that comes close is the wheel arch, `plastic` [1]–[4], centred
-(±1.013, 0.664, ∓2.45/2.71) with size (0.554, 0.744, 1.204). It wraps *outside* the tyre:
-its furthest corner is 0.827 m from the hub axis against the wheel's 0.466 m radius, it
-reaches 0.13 m further out along Z than the tyre, and it stands 0.10 m taller. It is a
-body part and it stays with the body — which is correct, since a wheel arch does not steer
-and does not turn.
+(±1.013, 0.664, ∓2.45/2.71) with size (0.554, 0.744, 1.204). It wraps *outside* the tyre,
+so no vertex of it is inside a cylinder. It is a body part and it stays with the body —
+which is correct, since a wheel arch does not steer and does not turn.
+
+How close is close? The script measures it, because the runtime extraction widens these
+cylinders by a tolerance and the margin is the budget for that tolerance:
+
+```
+clearance from each cylinder (widened by 0.01 m) to the nearest vertex that is not part of that wheel:
+  [0] radius 0.466 -> nearest foreign vertex at 0.513  (clearance 0.048 m, plastic [1])
+  [1] radius 0.466 -> nearest foreign vertex at 0.513  (clearance 0.048 m, plastic [3])
+  [2] radius 0.466 -> nearest foreign vertex at 0.509  (clearance 0.043 m, plastic [2])
+  [3] radius 0.466 -> nearest foreign vertex at 0.509  (clearance 0.043 m, plastic [4])
+```
+
+43 mm, against the 10 mm tolerance `busShellWheels.ts` uses — a fourfold margin, and one
+that fails loudly rather than quietly if a future asset closes it: an arch that reaches
+inside a cylinder *straddles* it, and the extraction throws instead of steering a wheel
+arch.
 
 ## Ruling: the assignment is not ambiguous
 

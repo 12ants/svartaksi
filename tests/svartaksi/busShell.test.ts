@@ -1,14 +1,30 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { BUS_ASSET_SIZE, busShellScale, setLampIntensity } from '@/svartaksi/busShell';
+import { assembleBusShell, BUS_ASSET_SIZE, busShellScale, setLampIntensity } from '@/svartaksi/busShell';
 import {
   applyBusShell,
   BUS_SHELL_MESH_NAMES,
   createBusModel,
   isBusShellPart,
   revealProceduralBusShell,
+  setBusSteer,
+  setBusWheelRoll,
+  setBusWheelTravel,
 } from '@/svartaksi/busModel';
-import { BUS_DIMENSIONS } from '@/svartaksi/busGeometry';
+import { BUS_DIMENSIONS, computeAckermannAngles } from '@/svartaksi/busGeometry';
+import type { BusShellWheel } from '@/svartaksi/busShellWheels';
+
+/** A wheel with no geometry: enough for the binding, nothing for a renderer to want. */
+function stubWheel(
+  restCenter: [number, number, number],
+  options: { front: boolean; side: 1 | -1; suspensionIndex: number },
+): BusShellWheel {
+  const steer = new THREE.Group();
+  const roll = new THREE.Group();
+  steer.add(roll);
+  steer.position.set(...restCenter);
+  return { steer, roll, restCenter: new THREE.Vector3(...restCenter), ...options };
+}
 
 describe('busShellScale', () => {
   it('puts the asset on the approved dimension sheet in every axis', () => {
@@ -113,5 +129,158 @@ describe('setLampIntensity', () => {
     expect(material.emissiveIntensity).toBe(0);
 
     expect(() => setLampIntensity(null, 1)).not.toThrow();
+  });
+});
+
+describe('the modelled shell\'s wheels', () => {
+  const frontLeft = () => stubWheel([1.1, 0.45, 2.9], { front: true, side: 1, suspensionIndex: 4 });
+  const rearRight = () => stubWheel([-1.1, 0.45, -2.6], { front: false, side: -1, suspensionIndex: 0 });
+
+  it('turns, rolls and springs from the setters that already drive the procedural ones', () => {
+    const model = createBusModel();
+    try {
+      const wheels = [frontLeft(), rearRight()];
+      applyBusShell(model, { group: new THREE.Group(), wheels });
+
+      setBusSteer(model, 0.1);
+      setBusWheelRoll(model, 1.2);
+      setBusWheelTravel(model, [0.03, 0, 0, 0, 0.05, 0]);
+
+      const { left } = computeAckermannAngles(0.1, BUS_DIMENSIONS.wheelbase, BUS_DIMENSIONS.track);
+      expect(wheels[0].steer.rotation.y).toBeCloseTo(left);
+      expect(wheels[1].steer.rotation.y).toBe(0);
+      expect(wheels[0].roll.rotation.x).toBeCloseTo(1.2);
+      expect(wheels[1].roll.rotation.x).toBeCloseTo(1.2);
+      expect(wheels[0].steer.position.y).toBeCloseTo(0.45 + 0.05);
+      expect(wheels[1].steer.position.y).toBeCloseTo(0.45 + 0.03);
+
+      // The procedural groups keep moving too, so the fallback stays usable.
+      expect(model.frontWheels[0].rotation.y).toBeCloseTo(left);
+      expect(model.wheelRoll[0].rotation.x).toBeCloseTo(1.2);
+    } finally {
+      model.dispose();
+    }
+  });
+
+  it('catches the wheels up the moment a shell arrives mid-ride', () => {
+    const model = createBusModel();
+    try {
+      setBusSteer(model, -0.08);
+      setBusWheelRoll(model, 4);
+      setBusWheelTravel(model, [0, 0, 0, 0, -0.02, 0]);
+
+      const wheels = [frontLeft()];
+      applyBusShell(model, { group: new THREE.Group(), wheels });
+
+      const { left } = computeAckermannAngles(-0.08, BUS_DIMENSIONS.wheelbase, BUS_DIMENSIONS.track);
+      expect(wheels[0].steer.rotation.y).toBeCloseTo(left);
+      expect(wheels[0].roll.rotation.x).toBeCloseTo(4);
+      expect(wheels[0].steer.position.y).toBeCloseTo(0.45 - 0.02);
+    } finally {
+      model.dispose();
+    }
+  });
+
+  it('accepts a shell that brought no wheels, as the tests and a re-export both may', () => {
+    const model = createBusModel();
+    try {
+      expect(() => applyBusShell(model, { group: new THREE.Group() })).not.toThrow();
+      expect(() => setBusSteer(model, 0.2)).not.toThrow();
+      expect(() => setBusWheelRoll(model, 1)).not.toThrow();
+      expect(() => setBusWheelTravel(model, [0, 0, 0, 0, 0, 0])).not.toThrow();
+    } finally {
+      model.dispose();
+    }
+  });
+});
+
+describe('assembleBusShell', () => {
+  /** A ring about the X axis, one connected component, centred on `hub`. */
+  function wheelBand(hub: { x: number; y: number; z: number }, radius: number, halfWidth: number): number[] {
+    const positions: number[] = [];
+    for (let i = 0; i < 8; i += 1) {
+      const [a, b] = [(i / 8) * Math.PI * 2, ((i + 1) / 8) * Math.PI * 2];
+      const ring = (angle: number, x: number) => [x, hub.y + Math.cos(angle) * radius, hub.z + Math.sin(angle) * radius];
+      positions.push(
+        ...ring(a, hub.x - halfWidth), ...ring(b, hub.x - halfWidth), ...ring(a, hub.x + halfWidth),
+        ...ring(b, hub.x - halfWidth), ...ring(b, hub.x + halfWidth), ...ring(a, hub.x + halfWidth),
+      );
+    }
+    return positions;
+  }
+
+  /** A stand-in asset carrying one wheel at each of the four measured hubs. */
+  function fakeAsset(): THREE.Object3D {
+    const hubs = [
+      { x: -1.0936, y: 0.4654, z: -2.4555 },
+      { x: 1.0933, y: 0.4654, z: -2.4555 },
+      { x: -1.0936, y: 0.4654, z: 2.7164 },
+      { x: 1.0933, y: 0.4654, z: 2.7164 },
+    ];
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(
+      hubs.flatMap((hub) => wheelBand(hub, 0.4, 0.15)),
+    ), 3));
+    const root = new THREE.Group();
+    root.add(new THREE.Mesh(geometry, new THREE.MeshStandardMaterial()));
+    return root;
+  }
+
+  it('keeps the fit scale off the wheels, so a steered wheel cannot shear', () => {
+    const scale = busShellScale();
+
+    const { group, wheels } = assembleBusShell(fakeAsset(), scale);
+
+    // The scale lives on the body, not on the shell root the wheels also hang from.
+    expect(group.scale.equals(new THREE.Vector3(1, 1, 1))).toBe(true);
+    const body = group.children.find((child) => child.name === 'bus:shell-body');
+    expect(body?.scale.toArray()).toEqual(scale.toArray());
+
+    group.updateMatrixWorld(true);
+    for (const wheel of wheels) {
+      const worldScale = new THREE.Vector3();
+      wheel.roll.matrixWorld.decompose(new THREE.Vector3(), new THREE.Quaternion(), worldScale);
+      expect(worldScale.x).toBeCloseTo(1, 6);
+      expect(worldScale.y).toBeCloseTo(1, 6);
+      expect(worldScale.z).toBeCloseTo(1, 6);
+    }
+  });
+
+  it('shows the authored wheels and hides the procedural ones, so the bus has four not ten', () => {
+    const model = createBusModel();
+    try {
+      const shell = assembleBusShell(fakeAsset(), busShellScale());
+      applyBusShell(model, shell);
+
+      for (const wheel of shell.wheels) {
+        // Visible all the way up: a wheel parented under something hidden would be an
+        // animation nobody can see, which is the regression this whole task exists to fix.
+        for (let node: THREE.Object3D | null = wheel.steer; node; node = node.parent) {
+          expect(node.visible).toBe(true);
+        }
+      }
+      for (const group of [...model.frontWheels, ...model.wheelRoll]) {
+        let hidden = false;
+        for (let node: THREE.Object3D | null = group; node; node = node.parent) {
+          if (!node.visible) hidden = true;
+        }
+        expect(hidden).toBe(true);
+      }
+    } finally {
+      model.dispose();
+    }
+  });
+
+  it('puts each wheel on the sheet, not in the asset\'s own unscaled space', () => {
+    const scale = busShellScale();
+
+    const { wheels } = assembleBusShell(fakeAsset(), scale);
+
+    expect(wheels).toHaveLength(4);
+    const frontLeft = wheels.find((wheel) => wheel.front && wheel.side === 1)!;
+    expect(frontLeft.restCenter.x).toBeCloseTo(1.0933 * scale.x, 3);
+    expect(frontLeft.restCenter.y).toBeCloseTo(0.4654 * scale.y, 3);
+    expect(frontLeft.restCenter.z).toBeCloseTo(2.7164 * scale.z, 3);
+    expect(frontLeft.suspensionIndex).toBe(4);
   });
 });

@@ -17,19 +17,26 @@
  *   sheet. The distortion is under 8% and invisible; the alternative — re-deriving the
  *   sheet from the asset — would move the wheelbase, and with it the turning circle every
  *   route was profiled against.
- * - **Its wheels do not turn.** The asset is exported one mesh per material, so a wheel
- *   is not a separable object: the rims are in one mesh with every other white part, the
- *   tyres in another with every other black one. The procedural wheels that *do* steer
- *   and roll sit at the sheet's axle positions rather than the asset's wheel arches, so
- *   showing both would put eight wheels on a six-wheeled bus. The modelled ones win on
- *   looks and the animation is lost with them; `setBusSteer`/`setBusWheelRoll` keep
- *   driving the hidden groups, so restoring it is a matter of splitting the asset, not of
- *   rebuilding the runtime.
+ * - **Its wheels are split back out of it.** The asset is exported one mesh per material,
+ *   so a wheel is not a node you can rotate — but it is still a *place*, and
+ *   busShellWheels.ts lifts the four wheels out by measured cylinder and hangs each one
+ *   off its own steer and roll pivot. The procedural wheels stay hidden and stay driven,
+ *   so a session that cannot fetch the asset still has a bus with turning wheels.
+ *
+ * The shell's own group carries no transform. The fit scale sits one level down, on the
+ * body, because the wheels have to rotate outside it: a rotation inside a non-uniform
+ * scale is a shear, and a wheel steered under this one would go visibly elliptical.
  */
 import * as THREE from 'three';
 import { gltfLoader } from './gltfLoaders';
 import { findMeshesByMaterialName } from './glbParts';
 import { BUS_DIMENSIONS } from './busGeometry';
+import {
+  BUS_SHELL_WHEEL_HUBS,
+  extractBusShellWheels,
+  type BusShellWheel,
+  type BusShellWheelHub,
+} from './busShellWheels';
 
 const MODEL_URL = new URL('../models/bus1.glb', import.meta.url).href;
 
@@ -53,6 +60,9 @@ export function busShellScale(): THREE.Vector3 {
 
 export interface BusShell {
   group: THREE.Group;
+  /** The four authored wheels, on their own pivots. `applyBusShell` keeps hold of these
+   * so the existing bus setters can drive them. */
+  wheels: readonly BusShellWheel[];
   /** The asset's lamp materials, by the names it gives them. Present so the runtime's
    * night/brake/indicator states can drive the modelled lenses the way they drove the
    * procedural ones; absent entries are tolerated, since a re-export may rename them. */
@@ -65,12 +75,60 @@ export interface BusShell {
   dispose(): void;
 }
 
+/** A shell built from an already-loaded scene: the scene graph, without the loader. */
+export interface AssembledBusShell {
+  group: THREE.Group;
+  wheels: BusShellWheel[];
+  /** Everything the split created or orphaned, for the shell to dispose at teardown. */
+  geometries: THREE.BufferGeometry[];
+}
+
+/**
+ * Builds the shell's scene graph around a loaded body, wheels and all.
+ *
+ * Split out of `loadBusShell` because everything interesting here is arithmetic on a scene
+ * graph — where the scale sits, where the wheels end up — and none of it needs a loader, a
+ * network or a GPU to be wrong. `loadBusShell` is then the thin part: fetch, drop the
+ * interior, call this.
+ *
+ * The scale goes on the body rather than on `group`, so the wheel pivots stay in unscaled
+ * bus space. See the module comment for why that matters.
+ */
+export function assembleBusShell(
+  root: THREE.Object3D,
+  scale: THREE.Vector3,
+  hubs: readonly BusShellWheelHub[] = BUS_SHELL_WHEEL_HUBS,
+): AssembledBusShell {
+  const extraction = extractBusShellWheels(root, scale, hubs);
+
+  const body = new THREE.Group();
+  body.name = 'bus:shell-body';
+  body.scale.copy(scale);
+  body.add(root);
+
+  const group = new THREE.Group();
+  group.name = 'bus:shell';
+  group.add(body, extraction.group);
+
+  return {
+    group,
+    wheels: extraction.wheels,
+    geometries: [...extraction.geometries, ...extraction.orphanedGeometries],
+  };
+}
+
 /**
  * Loads the shell, fitted and ready to add to the bus group.
  *
  * The asset's interior is dropped: the saloon the player actually walks around in is the
  * procedural one, built to the aisle and seat colliders the rider is clamped against, and
- * two interiors in one bus would leave the player wading through baked seats.
+ * two interiors in one bus would leave the player wading through baked seats. It goes
+ * before the wheel split so the split never has to reason about geometry that is on its
+ * way out.
+ *
+ * Rejects an asset whose wheels it cannot find: `busShellWheels` throws rather than
+ * installing a bus with holes where its running gear was, and the runtime's `.catch`
+ * keeps the whole procedural bus — which does have turning wheels.
  */
 export async function loadBusShell(): Promise<BusShell> {
   const gltf = await gltfLoader().loadAsync(MODEL_URL);
@@ -84,11 +142,6 @@ export async function loadBusShell(): Promise<BusShell> {
     object.receiveShadow = true;
   });
 
-  const group = new THREE.Group();
-  group.name = 'bus:shell';
-  group.scale.copy(busShellScale());
-  group.add(root);
-
   const lamps = {
     head: lampMaterial(root, 'headlght'),
     tail: lampMaterial(root, 'rearlght'),
@@ -96,8 +149,11 @@ export async function loadBusShell(): Promise<BusShell> {
     indicator: lampMaterial(root, 'turnlght'),
   };
 
+  const { group, wheels, geometries } = assembleBusShell(root, busShellScale());
+
   return {
     group,
+    wheels,
     lamps,
     dispose() {
       group.traverse((object) => {
@@ -106,6 +162,9 @@ export async function loadBusShell(): Promise<BusShell> {
         const materials = Array.isArray(object.material) ? object.material : [object.material];
         for (const material of materials) material.dispose();
       });
+      // The split leaves the rim mesh empty and detached, so its geometry is no longer
+      // reachable from the traversal above.
+      for (const geometry of geometries) geometry.dispose();
     },
   };
 }
