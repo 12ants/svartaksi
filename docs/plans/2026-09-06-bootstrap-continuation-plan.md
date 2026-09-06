@@ -28,8 +28,10 @@ is available. With only the committed material-batched GLB, use connected triang
 components and measured wheel regions. Do not apply the Saab's axis-gap split to the
 entire bus: body trim shares material and spatial ranges with wheels.
 
-- [ ] Inspect the GLB's mesh transforms, indexed triangles, materials, and component bounds with an offline script. Record asset checksum, coordinate convention, component IDs, physical wheel count, hub centers, and left/right/front/rear assignments in the asset notes.
-- [ ] Inspect those assignments manually in the existing model authoring tools. Require all tyre/rim parts and no body/trim triangles in a wheel. If ambiguous, stop the geometry change and request a named-wheel re-export; retain the procedural fallback.
+- [x] Inspect the GLB's mesh transforms, indexed triangles, materials, and component bounds with an offline script. Record asset checksum, coordinate convention, component IDs, physical wheel count, hub centers, and left/right/front/rear assignments in the asset notes.
+  **Result 2026-09-06:** `scripts/inspect-bus-glb.mjs` (committed, deterministic). Four wheels, 8 components / 1,772 triangles each, hub centres and sidedness recorded in [the asset notes](2026-09-06-bus-wheel-asset-notes.md).
+- [ ] **Manual authoring-tool inspection UNVERIFIED — headless worktree.** Inspect those assignments manually in the existing model authoring tools. Require all tyre/rim parts and no body/trim triangles in a wheel. If ambiguous, stop the geometry change and request a named-wheel re-export; retain the procedural fallback.
+  **Ruling 2026-09-06: not ambiguous, proceed.** The all-tyre/rim-and-no-body requirement is checked exhaustively by the script over every component of every mesh (the "straddles" report is empty) rather than sampled by eye, and the runtime extraction throws rather than installing a partial shell. What the missing eyeball check does *not* cover is listed under "Manual inspection: UNVERIFIED" in the asset notes.
 - [ ] Define the CPU-only grouping interface below. `restCenter` is in final bus coordinates after baking source transforms and `busShellScale()`. `suspensionIndex` uses the existing six-entry order documented by `setBusWheelTravel`; distinct visual groups may share a travel source when the asset has a different tyre count.
 
 ```ts
