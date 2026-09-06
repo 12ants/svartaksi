@@ -210,6 +210,7 @@ import {
   FOOT_RIG, HORSE_RIG, INTERIOR_RIG, OPENING_CAM_INTRO_DURATION_MS, resolveCameraPlacement,
   resolveOpeningIntroPlacement, VEHICLE_RIG,
 } from './cameraRig';
+import { createCameraTransformApplier, updateCameraFov } from './runtimeCamera';
 import {
   createPlayerInputController,
   type BlobControlScheme,
@@ -846,6 +847,7 @@ function WorldScene({
   const renderBudgetRef = useRef(createRenderBudget());
   const performanceCaptureRef = useRef(createPerformanceCapture());
   const worldDataCacheRef = useRef(createWorldDataCache());
+  const [applyCameraTransform] = useState(createCameraTransformApplier);
 
   // Car-physics/camera state — plain refs, mutated every frame, not React state.
   const velocityRef = useRef(0);
@@ -3639,23 +3641,15 @@ function WorldScene({
       if (introPlacement === null && control.cameraMode !== 'top-down') {
         clampPlacementAboveGround(placement, groundHeightAt, CAMERA.groundClearance);
       }
-      const targetRotation = new THREE.Quaternion().setFromRotationMatrix(
-        new THREE.Matrix4().lookAt(placement.position, placement.lookAt, state.camera.up),
-      );
       const cameraBlend = 1 - Math.exp(-dt / cameraEaseTau(control.camera.responsiveness));
-      state.camera.position.lerp(placement.position, cameraBlend);
-      state.camera.quaternion.slerp(targetRotation, cameraBlend);
+      applyCameraTransform(state.camera, placement.position, placement.lookAt, cameraBlend);
     }
 
     // Field of view, written only when it actually changed: updateProjectionMatrix is
     // cheap but not free, and this runs every frame for a value that changes only when a
     // slider moves. The camera's own `fov` is the record of what was last written — this
     // block is its only writer — so there is nothing to shadow it with.
-    const camera = state.camera as THREE.PerspectiveCamera;
-    if (camera.isPerspectiveCamera && camera.fov !== control.camera.fov) {
-      camera.fov = control.camera.fov;
-      camera.updateProjectionMatrix();
-    }
+    updateCameraFov(state.camera, control.camera.fov);
 
     // Render budget: sampled every frame (cheap), but the (possibly expensive)
     // buildings-visibility re-scan is throttled — except right after a budget change,

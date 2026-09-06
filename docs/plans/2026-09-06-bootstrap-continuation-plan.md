@@ -132,9 +132,15 @@ const disposeOwned = () => {
 `cameraSettings.ts`; create `src/svartaksi/runtimeCamera.ts` and
 `tests/svartaksi/runtimeCamera.test.ts` only if this extraction is selected.
 
-- [ ] First inventory the camera block's inputs and mutable state: intro transition, mode-entry time, vehicle/on-foot rig, terrain clamp, responsiveness, and FOV.
-- [ ] Add characterization tests for mode switches, intro completion, terrain clearance, and repeated FOV values before moving the block. Reuse `tests/svartaksi/cameraRig.test.ts` fixtures.
-- [ ] Move only the final transform application into a closure that owns scratch objects; leave mode/intro decisions at the existing frame location. Suggested boundary:
+- [x] First inventory the camera block's inputs and mutable state: intro transition, mode-entry time, vehicle/on-foot rig, terrain clamp, responsiveness, and FOV.
+  **Result 2026-09-07:** intro timing, cockpit handoff, mode-entry clocks, rig selection,
+  terrain clamping, and responsiveness remain at their original frame-loop location. Only
+  the resolved pose easing and change-only FOV application cross the new boundary.
+- [x] Add characterization tests for mode switches, intro completion, terrain clearance, and repeated FOV values before moving the block. Reuse `tests/svartaksi/cameraRig.test.ts` fixtures.
+  **Result 2026-09-07:** existing `cameraRig.test.ts` cases cover orbit entry, intro
+  completion, and terrain/deck clearance. `runtimeCamera.test.ts` adds transform easing,
+  nested two-instance isolation, non-perspective handling, and repeated-FOV coverage.
+- [x] Move only the final transform application into a closure that owns scratch objects; leave mode/intro decisions at the existing frame location. Suggested boundary:
 
 ```ts
 export function createCameraTransformApplier() {
@@ -149,6 +155,12 @@ export function createCameraTransformApplier() {
 }
 ```
 
-- [ ] Create the closure once per mounted runtime, not per frame. Test two instances to exclude shared scratch-state coupling; compare transforms to the old expressions.
+- [x] Create the closure once per mounted runtime, not per frame. Test two instances to exclude shared scratch-state coupling; compare transforms to the old expressions.
+  **Result 2026-09-07:** `useState(createCameraTransformApplier)` constructs one closure
+  per mount. Its matrix and quaternion are reused across frames, and the re-entrant
+  two-instance test would fail if either scratch object moved to module scope.
 - [ ] Manually check every camera mode during walking, driving, bus riding, and entry/exit. Run the camera suites, `pnpm test:all`, and `pnpm build`.
-- [ ] Record this as `refactor: isolate camera transform application`. Do not describe file-size reduction as an FPS improvement. Further subsystem extraction requires its own boundary design.
+  **Automated result 2026-09-07:** 38 focused camera tests and the full 145-file,
+  1,466-test suite pass; lint, typecheck, and production build pass. Manual camera-mode
+  checks remain unverified.
+- [x] Record this as `refactor: isolate camera transform application`. Do not describe file-size reduction as an FPS improvement. Further subsystem extraction requires its own boundary design.
