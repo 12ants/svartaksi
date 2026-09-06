@@ -316,6 +316,35 @@ describe('extractBusShellWheels', () => {
     expect(() => extractBusShellWheels(root, UNIT_SCALE, FIXTURE_HUBS)).toThrow(/no geometry/i);
   });
 
+  it('refuses partial wheels even when every hub contains some geometry', () => {
+    const tyresOnly = geometryFrom([
+      ...wheelBand(nodeSpace({ x: -1, y: 0.5, z: 2 }), 0.35, 0.16),
+      ...wheelBand(nodeSpace({ x: 1, y: 0.5, z: 2 }), 0.35, 0.16),
+    ]);
+    const root = fixtureRoot([tyresOnly]);
+    const strictHubs = FIXTURE_HUBS.map((hub) => ({
+      ...hub,
+      expectedParts: [{ materialName: 'shared', componentCount: 2, triangleCount: 32 }],
+    }));
+
+    expect(() => extractBusShellWheels(root, UNIT_SCALE, strictHubs)).toThrow(/topology/i);
+    // Contract checks run before mutation, so fallback receives the original asset.
+    expect(tyresOnly.getIndex()).toBeNull();
+    expect(root.children).toHaveLength(1);
+  });
+
+  it('accepts a wheel whose material components match its measured topology', () => {
+    const { root } = assetLikeFixture();
+    const strictHubs = FIXTURE_HUBS.map((hub) => ({
+      ...hub,
+      expectedParts: [{ materialName: 'shared', componentCount: 2, triangleCount: 32 }],
+    }));
+
+    const { wheels } = extractBusShellWheels(root, UNIT_SCALE, strictHubs);
+
+    expect(wheels).toHaveLength(2);
+  });
+
   it('names its groups so the procedural shell hider does not claim them', () => {
     const { root } = assetLikeFixture();
 

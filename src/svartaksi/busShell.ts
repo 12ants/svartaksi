@@ -119,6 +119,8 @@ export function assembleBusShell(
 
 /**
  * Builds the shell from an already-loaded scene, and takes ownership of everything in it.
+ * Ownership transfers when this function is called: resources are disposed if validation
+ * throws because no returned shell owner would otherwise exist.
  *
  * The asset's interior is dropped: the saloon the player actually walks around in is the
  * procedural one, built to the aisle and seat colliders the rider is clamped against, and
@@ -168,7 +170,17 @@ export function createBusShell(
     indicator: lampMaterial(root, 'turnlght'),
   };
 
-  const assembled = assembleBusShell(root, busShellScale(), hubs);
+  let assembled: AssembledBusShell;
+  try {
+    assembled = assembleBusShell(root, busShellScale(), hubs);
+  } catch (error) {
+    // Topology rejection is a normal fallback path: the runtime keeps the procedural bus.
+    // No BusShell owner is returned on that path, so release the imported resources here.
+    // Extraction validates completely before mutating or allocating output geometries.
+    for (const geometry of geometries) geometry.dispose();
+    for (const material of materials) material.dispose();
+    throw error;
+  }
   for (const geometry of assembled.geometries) geometries.add(geometry);
 
   let disposed = false;

@@ -96,7 +96,23 @@ export interface BusShellWheelHub {
   front: boolean;
   side: 1 | -1;
   suspensionIndex: number;
+  /** Exact measured topology for assets whose wheel contract is known. Omit only for
+   * synthetic or deliberately generic extraction callers. */
+  expectedParts?: readonly BusShellWheelPartExpectation[];
 }
+
+export interface BusShellWheelPartExpectation {
+  materialName: string;
+  componentCount: number;
+  triangleCount: number;
+}
+
+const BUS_SHELL_WHEEL_PARTS: readonly BusShellWheelPartExpectation[] = [
+  // Component counts depend on connectedTriangleComponents' WELD_EPSILON_M as well as
+  // the measured GLB. Re-run scripts/inspect-bus-glb.mjs when either contract changes.
+  { materialName: 'black', componentCount: 7, triangleCount: 802 },
+  { materialName: 'wheel', componentCount: 1, triangleCount: 970 },
+];
 
 /**
  * The four wheels of `bus1.glb` (sha256 95b9935d…), measured by
@@ -116,21 +132,25 @@ export const BUS_SHELL_WHEEL_HUBS: readonly BusShellWheelHub[] = [
     x: -1.0936018526554108, y: 0.4653582274913788, z: -2.455503463745117,
     radius: 0.4656279328320925, halfWidth: 0.203398197889328,
     front: false, side: -1, suspensionIndex: 0,
+    expectedParts: BUS_SHELL_WHEEL_PARTS,
   },
   {
     x: 1.093330293893814, y: 0.4653582274913788, z: -2.455503463745117,
     radius: 0.4656279328320925, halfWidth: 0.20363447070121765,
     front: false, side: 1, suspensionIndex: 2,
+    expectedParts: BUS_SHELL_WHEEL_PARTS,
   },
   {
     x: -1.0936018526554108, y: 0.4653582274913788, z: 2.7163796424865723,
     radius: 0.46564945755409926, halfWidth: 0.203398197889328,
     front: true, side: -1, suspensionIndex: 5,
+    expectedParts: BUS_SHELL_WHEEL_PARTS,
   },
   {
     x: 1.093330293893814, y: 0.4653582274913788, z: 2.7163796424865723,
     radius: 0.46564945755409926, halfWidth: 0.20363447070121765,
     front: true, side: 1, suspensionIndex: 4,
+    expectedParts: BUS_SHELL_WHEEL_PARTS,
   },
 ];
 
@@ -319,6 +339,40 @@ export function extractBusShellWheels(
       `[busShellWheels] no geometry inside the ${describeHub(hub)} wheel's measured cylinder. `
       + 'The asset does not carry the running gear these hubs were measured from; re-measure with '
       + 'scripts/inspect-bus-glb.mjs.',
+    );
+  }
+
+  for (const [hubIndex, hub] of hubs.entries()) {
+    if (!hub.expectedParts) continue;
+    const actual = new Map<string, { componentCount: number; triangleCount: number }>();
+    for (const component of classified.filter((candidate) => candidate.hub === hubIndex)) {
+      const material = component.mesh.material;
+      const materialName = Array.isArray(material)
+        ? `<multiple:${material.map((entry) => entry.name).join(',')}>`
+        : material.name;
+      const count = actual.get(materialName) ?? { componentCount: 0, triangleCount: 0 };
+      count.componentCount += 1;
+      count.triangleCount += component.triangles.length;
+      actual.set(materialName, count);
+    }
+    const matches = actual.size === hub.expectedParts.length
+      && hub.expectedParts.every((expected) => {
+        const found = actual.get(expected.materialName);
+        return found?.componentCount === expected.componentCount
+          && found.triangleCount === expected.triangleCount;
+      });
+    if (matches) continue;
+    const describe = (parts: Iterable<readonly [
+      string,
+      { componentCount: number; triangleCount: number },
+    ]>) =>
+      [...parts].map(([name, value]) =>
+        `${name}:${value.componentCount} components/${value.triangleCount} triangles`).join(', ');
+    const expected = hub.expectedParts.map((part) => [part.materialName, part] as const);
+    throw new Error(
+      `[busShellWheels] topology mismatch at the ${describeHub(hub)} wheel; expected `
+      + `{${describe(expected)}} but found {${describe(actual)}}. Re-measure the changed asset with `
+      + 'scripts/inspect-bus-glb.mjs or re-export it with named wheel nodes.',
     );
   }
 

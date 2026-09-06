@@ -18,7 +18,13 @@ import {
   setBusWheelTravel,
 } from '@/svartaksi/busModel';
 import { BUS_DIMENSIONS, computeAckermannAngles } from '@/svartaksi/busGeometry';
-import type { BusShellWheel } from '@/svartaksi/busShellWheels';
+import { BUS_SHELL_WHEEL_HUBS, type BusShellWheel } from '@/svartaksi/busShellWheels';
+
+/** Synthetic fixtures exercise layout and ownership, not bus1.glb's exact topology. */
+const TEST_WHEEL_HUBS = BUS_SHELL_WHEEL_HUBS.map((hub) => ({
+  x: hub.x, y: hub.y, z: hub.z, radius: hub.radius, halfWidth: hub.halfWidth,
+  front: hub.front, side: hub.side, suspensionIndex: hub.suspensionIndex,
+}));
 
 /** A wheel with no geometry: enough for the binding, nothing for a renderer to want. */
 function stubWheel(
@@ -235,7 +241,7 @@ describe('assembleBusShell', () => {
   it('keeps the fit scale off the wheels, so a steered wheel cannot shear', () => {
     const scale = busShellScale();
 
-    const { group, wheels } = assembleBusShell(fakeAsset(), scale);
+    const { group, wheels } = assembleBusShell(fakeAsset(), scale, TEST_WHEEL_HUBS);
 
     // The scale lives on the body, not on the shell root the wheels also hang from.
     expect(group.scale.equals(new THREE.Vector3(1, 1, 1))).toBe(true);
@@ -255,7 +261,7 @@ describe('assembleBusShell', () => {
   it('shows the authored wheels and hides the procedural ones, so the bus has four not ten', () => {
     const model = createBusModel();
     try {
-      const shell = assembleBusShell(fakeAsset(), busShellScale());
+      const shell = assembleBusShell(fakeAsset(), busShellScale(), TEST_WHEEL_HUBS);
       applyBusShell(model, shell);
 
       for (const wheel of shell.wheels) {
@@ -280,7 +286,7 @@ describe('assembleBusShell', () => {
   it('puts each wheel on the sheet, not in the asset\'s own unscaled space', () => {
     const scale = busShellScale();
 
-    const { wheels } = assembleBusShell(fakeAsset(), scale);
+    const { wheels } = assembleBusShell(fakeAsset(), scale, TEST_WHEEL_HUBS);
 
     expect(wheels).toHaveLength(4);
     const frontLeft = wheels.find((wheel) => wheel.front && wheel.side === 1)!;
@@ -326,9 +332,10 @@ describe('bus shell resource ownership', () => {
     wheelGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
 
     const root = new THREE.Group();
-    // The interior mesh carries the interior material, and shares nothing with the body;
-    // the exterior mesh carries the shared one. Both are dropped by name, not by geometry.
-    const interior = new THREE.Mesh(interiorGeometry, interiorMaterial);
+    // The interior is identified by one material and also uses the body's paint. This is
+    // the dangerous case: releasing materials while dropping the interior would dispose
+    // `shared` out from under the retained exterior.
+    const interior = new THREE.Mesh(interiorGeometry, [interiorMaterial, shared]);
     root.add(interior, new THREE.Mesh(exteriorGeometry, shared), new THREE.Mesh(wheelGeometry, wheelMaterial));
 
     const spies = new Map<string, ReturnType<typeof vi.spyOn>>();
@@ -348,7 +355,7 @@ describe('bus shell resource ownership', () => {
   it('keeps a material the body still uses alive when the interior is dropped', () => {
     const { root, spies } = loadedScene();
 
-    const shell = createBusShell(root);
+    const shell = createBusShell(root, TEST_WHEEL_HUBS);
 
     // Nothing is released while the shell is being built: the interior is detached, not
     // destroyed, and a material it happened to share would still be on the body.
@@ -358,7 +365,7 @@ describe('bus shell resource ownership', () => {
 
   it('releases the detached interior, the retained body and the split wheels exactly once', () => {
     const { root, spies } = loadedScene();
-    const shell = createBusShell(root);
+    const shell = createBusShell(root, TEST_WHEEL_HUBS);
     const created: THREE.BufferGeometry[] = [];
     for (const wheel of shell.wheels) {
       wheel.roll.traverse((object) => { if (object instanceof THREE.Mesh) created.push(object.geometry); });
@@ -375,11 +382,26 @@ describe('bus shell resource ownership', () => {
 
   it('is inert when disposed twice', () => {
     const { root, spies } = loadedScene();
-    const shell = createBusShell(root);
+    const shell = createBusShell(root, TEST_WHEEL_HUBS);
 
     shell.dispose();
     shell.dispose();
     shell.dispose();
+
+    for (const [name, spy] of spies) expect(spy, name).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases every imported resource when wheel validation rejects the asset', () => {
+    const { root, spies } = loadedScene();
+    const impossibleHubs = [
+      ...TEST_WHEEL_HUBS,
+      {
+        x: 10, y: 10, z: 10, radius: 0.4, halfWidth: 0.2,
+        front: true, side: 1 as const, suspensionIndex: 4,
+      },
+    ];
+
+    expect(() => createBusShell(root, impossibleHubs)).toThrow(/no geometry/i);
 
     for (const [name, spy] of spies) expect(spy, name).toHaveBeenCalledTimes(1);
   });
@@ -388,7 +410,7 @@ describe('bus shell resource ownership', () => {
     const { root, spies } = loadedScene();
 
     // The runtime's `.then` disposes a shell it never attached; nothing else ever will.
-    const shell = createBusShell(root);
+    const shell = createBusShell(root, TEST_WHEEL_HUBS);
     shell.dispose();
 
     for (const [name, spy] of spies) expect(spy, name).toHaveBeenCalledTimes(1);
@@ -397,7 +419,7 @@ describe('bus shell resource ownership', () => {
 
   it('leaves the shell to its own owner when the bus model is disposed', () => {
     const { root, spies } = loadedScene();
-    const shell = createBusShell(root);
+    const shell = createBusShell(root, TEST_WHEEL_HUBS);
     const model = createBusModel();
     applyBusShell(model, shell);
 
