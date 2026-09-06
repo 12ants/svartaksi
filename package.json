@@ -1,0 +1,57 @@
+{
+  "name": "svartaksi",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.20.0",
+  "engines": {
+    "pnpm": ">=11",
+    "npm": "please-use-pnpm",
+    "yarn": "please-use-pnpm"
+  },
+  "scripts": {
+    "preinstall": "npx only-allow pnpm",
+    "dev": "vite",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "build": "vite build",
+    "deploy": "node scripts/prefetch-world.mjs -- --offline --emit world && vite build && npx wrangler pages deploy ./dist",
+    "test": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest --config vitest.config.ts",
+    "test:all": "pnpm run lint && pnpm run typecheck && pnpm run test",
+    "push": "node --experimental-strip-types scripts/push.mjs",
+    "prefetch:world": "node scripts/prefetch-world.mjs"
+  },
+  "dependencies": {
+    "@cloudflare/vite-plugin": "^1.51.1",
+    "@mapbox/vector-tile": "^3.0.0",
+    "@react-three/fiber": "^9.7.0",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
+    "maplibre-gl": "^5.24.0",
+    "ngraph.graph": "^20.1.2",
+    "ngraph.path": "^1.6.1",
+    "pbf": "^5.1.2",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@testing-library/jest-dom": "^6.10.0",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^26.2.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@types/three": "^0.185.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "eslint": "^10.8.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.9.0",
+    "jsdom": "^29.1.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.66.0",
+    "vite": "^8.2.1",
+    "vitest": "^4.1.10"
+  }
+}

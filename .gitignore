@@ -1,0 +1,11 @@
+node_modules/
+coverage/
+test-results/
+.DS_Store
+*.log
+.vercel
+dist/
+.worktrees/
+.claude/settings.local.json
+.wrangler/
+vendor/worldcache/areas/

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "id": "stable-quest",
+  "flags": [
+    "stable:visited",
+    "stable:tranquilizer-taken",
+    "stable:horse-mounted"
+  ],
+  "places": [{ "id": "stable", "label": "The stable" }],
+  "beats": [
+    {
+      "id": "find-stable",
+      "title": "Find the stable",
+      "description": "A quest sends the player to a stable somewhere in the forest, or wherever the map actually put one.",
+      "trigger": { "kind": "near-place", "placeId": "stable", "radiusMeters": 25 },
+      "requiredFlags": [],
+      "effects": [{ "kind": "set-flag", "flag": "stable:visited" }]
+    },
+    {
+      "id": "take-tranquilizer",
+      "title": "Take the horse tranquilizer",
+      "description": "No inventory exists yet, so the tranquilizer is modelled as a flag the stable sets rather than a carried item — see docs/BACKLOG.md item 15's stated dependency on item 11's story runtime, which is not built yet either.",
+      "trigger": { "kind": "interaction", "targetId": "stable-tranquilizer" },
+      "requiredFlags": ["stable:visited"],
+      "effects": [
+        { "kind": "set-flag", "flag": "stable:tranquilizer-taken" },
+        {
+          "kind": "dialogue",
+          "lines": [
+            { "id": "stable-tranq-1", "speakerId": "narrator", "text": "A tranquilizer, half-used, sits on the tack-room shelf." }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mount-horse",
+      "title": "Mount the horse",
+      "trigger": { "kind": "interaction", "targetId": "stable-horse" },
+      "requiredFlags": ["stable:tranquilizer-taken"],
+      "effects": [{ "kind": "set-flag", "flag": "stable:horse-mounted" }]
+    }
+  ]
+}

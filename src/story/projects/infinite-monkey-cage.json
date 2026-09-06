@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "infinite-monkey-cage",
+  "flags": [
+    "monkey-cage:contacted"
+  ],
+  "places": [],
+  "beats": [
+    {
+      "id": "receive-reveal",
+      "title": "infinite_monkey_cage",
+      "description": "An unlisted number has been texting fragments of poetry all evening. The fifth message names what it is: someone, or something, working through every possible line.",
+      "trigger": { "kind": "phone-message", "messageId": "monkey-cage-reveal" },
+      "requiredFlags": [],
+      "effects": [
+        { "kind": "set-flag", "flag": "monkey-cage:contacted" },
+        {
+          "kind": "dialogue",
+          "lines": [
+            { "id": "monkey-cage-1", "speakerId": "narrator", "text": "OKANT NUMMER has sent five verses tonight, one at a time, unprompted." },
+            { "id": "monkey-cage-2", "speakerId": "narrator", "text": "The fifth message calls itself infinite_monkey_cage, and does not explain further." }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,609 @@
+:root {
+  --game-ui-bg: rgba(8, 8, 8, .92);
+  --game-ui-panel: #111;
+  --game-ui-border: rgba(255, 255, 255, .28);
+  --game-ui-text: #eeeeea;
+  --game-ui-muted: rgba(238, 238, 234, .62);
+  --game-ui-accent: #deded6;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  color: var(--game-ui-text);
+  background: #090909;
+  font-synthesis: none;
+}
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; height: 100dvh; margin: 0; overflow: hidden; }
+button { font: inherit; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--game-ui-accent); outline-offset: 2px; }
+.svartaksi-shell { position: relative; width: 100%; height: 100%; background: #91aeb7; }
+.three-world, .three-world canvas { display: block; width: 100%; height: 100%; }
+/* Full-screen curtain shared by the initial load and the load-failed state. Its own
+   background is transparent — the gradient wash lives in .world-curtain-backdrop, a
+   separate layer behind the content, so the backdrop alone can fade out near the end
+   of the load while the verse/bar/build badge stay fully legible until the curtain
+   unmounts outright. */
+.world-curtain {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 28px;
+  padding: 32px 24px;
+  color: #eef3ef;
+  text-align: center;
+  font: 600 12px/1.4 ui-monospace, monospace;
+}
+/* The radial wash keeps the centre readable while the edges stay near-black, so the
+   verse reads as printed on the dark rather than floating in a flat panel. Opacity is
+   driven from JS as load progress nears completion; the transition is what makes that
+   a slow fade rather than a jump cut. */
+.world-curtain-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(120% 90% at 50% 42%, rgba(24, 33, 38, 0.96) 0%, rgba(6, 9, 11, 0.99) 72%),
+    #06090b;
+  transition: opacity 1.4s ease;
+  pointer-events: none;
+}
+.loading-verse {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  max-width: min(46ch, calc(100vw - 48px));
+  color: #dfe7e2;
+  font: 400 clamp(15px, 2.4vw, 20px)/1.5 Inter, ui-sans-serif, system-ui, sans-serif;
+  animation: verse-in 1.1s ease-out both;
+}
+.loading-verse span { display: block; text-wrap: balance; }
+@keyframes verse-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .loading-verse { animation: none; } }
+.world-load-error {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+}
+.world-loading-progress {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  color: rgba(189, 201, 195, 0.85);
+  font: 600 10px/1.3 ui-monospace, monospace;
+  letter-spacing: 0.08em;
+  width: min(560px, calc(100vw - 48px));
+  text-align: center;
+}
+.world-loading-progress progress,
+.world-stream-progress progress { width: min(420px, calc(100vw - 48px)); accent-color: #f3c96b; }
+.world-stream-progress {
+  position: fixed;
+  z-index: 35;
+  left: 50%;
+  bottom: 18px;
+  display: grid;
+  gap: 6px;
+  transform: translateX(-50%);
+  padding: 8px 12px;
+  background: rgba(8, 13, 15, 0.9);
+  color: #eef3ef;
+  font: 600 10px/1.3 ui-monospace, monospace;
+  width: min(560px, calc(100vw - 32px));
+  box-sizing: border-box;
+  pointer-events: none;
+  overflow-wrap: anywhere;
+}
+.world-stream-progress progress { width: 100%; }
+.world-load-error button { min-height: 44px; }
+.loading-build {
+  position: absolute;
+  right: max(14px, env(safe-area-inset-right));
+  bottom: max(12px, env(safe-area-inset-bottom));
+  /* Deliberately faint: it is a stamp you go looking for to check what is live, not
+     something the loading screen should be presenting. */
+  color: rgba(238, 238, 234, 0.26);
+  font: 600 9px/1 ui-monospace, monospace;
+  letter-spacing: 0.08em;
+}
+.control-hint { position: absolute; right: 20px; bottom: 22px; display: flex; align-items: center; gap: 7px; color: rgba(244,246,239,.8); font: 700 9px/1 ui-monospace, monospace; }
+.control-hint kbd { padding: 6px 8px; background: rgba(13,20,20,.82); border: 1px solid rgba(255,255,255,.18); border-radius: 3px; color: #fff; }
+/* Transient contextual prompt (entering a car, a bus pulling in). Centred low so it
+   reads as an in-world call to action rather than part of the persistent HUD. */
+.action-hint { position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); padding: 8px 14px; background: rgba(13,20,20,.86); border: 1px solid rgba(255,255,255,.22); border-radius: 4px; color: #fff; font: 700 11px/1 ui-monospace, monospace; letter-spacing: .1em; pointer-events: none; animation: action-hint-in .18s ease-out; }
+@keyframes action-hint-in { from { opacity: 0; transform: translate(-50%, 6px); } to { opacity: 1; transform: translate(-50%, 0); } }
+.world-panel { position: absolute; top: 88px; right: 20px; width: min(380px, calc(100vw - 40px)); max-height: calc(100vh - 108px); overflow-y: auto; padding: 20px; color: #eef2eb; background: rgba(15,22,22,.96); border: 1px solid rgba(255,255,255,.14); border-radius: 6px; box-shadow: 0 24px 60px rgba(0,0,0,.35); }
+.panel-heading { display: flex; justify-content: space-between; align-items: start; }
+.panel-heading small { color: #ff765f; font: 700 9px/1 ui-monospace, monospace; }
+.panel-heading h2 { margin: 5px 0 0; font-size: 22px; letter-spacing: 0; }
+.panel-heading button { width: 32px; height: 32px; border: 0; border-radius: 4px; color: #eaf0ea; background: #293231; cursor: pointer; font-size: 22px; }
+.world-panel > p { margin: 16px 0; color: #aeb9b3; font-size: 13px; line-height: 1.5; }
+.source-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.source-switch button { min-width: 0; padding: 12px; text-align: left; color: #dfe6df; background: #202928; border: 1px solid #36413f; border-radius: 4px; cursor: pointer; }
+.source-switch button[aria-pressed="true"] { border-color: #ff765f; background: #352a27; box-shadow: inset 0 -2px #ff5b40; }
+.source-switch strong, .source-switch span { display: block; }
+.source-switch strong { font-size: 13px; }
+.source-switch span { margin-top: 5px; color: #96a39d; font: 600 9px/1.3 ui-monospace, monospace; }
+.render-section-title { margin: 18px 0 8px; color: #87948e; font: 700 9px/1 ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; }
+.quality-switch { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.camera-switch { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.camera-switch button { min-width: 0; padding: 9px 4px; border: 1px solid #36413f; border-radius: 4px; color: #aeb9b3; background: #202928; cursor: pointer; font: 700 9px/1 ui-monospace, monospace; }
+.camera-switch button[aria-pressed="true"] { border-color: #ff765f; color: #fff; background: #352a27; }
+.quality-switch button { min-width: 0; padding: 9px 4px; border: 1px solid #36413f; border-radius: 4px; color: #aeb9b3; background: #202928; cursor: pointer; font: 700 9px/1 ui-monospace, monospace; }
+.quality-switch button[aria-pressed="true"] { border-color: #ff765f; color: #fff; background: #352a27; }
+.model-library { display: grid; gap: 6px; }
+.model-library select { width: 100%; padding: 7px 8px; border: 1px solid #303a38; border-radius: 4px; color: #cbd3ce; background: #182120; font: 600 10px/1.2 ui-monospace, monospace; }
+.model-library-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.model-library-actions button { padding: 8px 9px; border: 0; border-radius: 3px; color: #101817; background: #7fe09b; cursor: pointer; font: 700 9px/1 ui-monospace, monospace; }
+.model-library-actions button:disabled { color: #8b968f; background: #293231; cursor: default; }
+.model-library-note { margin: 0; color: #87948e; font: 600 9px/1.45 ui-monospace, monospace; }
+.model-library-note code { color: #a9b6af; }
+.render-options { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.render-option { display: flex; align-items: center; justify-content: space-between; padding: 8px 9px; border: 1px solid #303a38; border-radius: 4px; color: #cbd3ce; font: 600 10px/1 ui-monospace, monospace; }
+.render-option button { min-width: 42px; padding: 5px 7px; border: 0; border-radius: 3px; color: #101817; background: #7fe09b; cursor: pointer; font: 700 9px/1 ui-monospace, monospace; }
+.render-option button[aria-checked="false"] { color: #aab6af; background: #293231; }
+.render-slider { grid-column: 1 / -1; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; padding: 8px 9px; border: 1px solid #303a38; border-radius: 4px; color: #cbd3ce; font: 600 10px/1 ui-monospace, monospace; }
+.render-slider input { width: 100%; accent-color: #7fe09b; cursor: pointer; }
+.render-slider input:disabled { cursor: default; opacity: 0.4; }
+.render-slider output { min-width: 44px; text-align: right; color: #7fe09b; }
+.time-of-day-readout { min-width: 44px; color: #cbd3ce; font: 700 11px/1 ui-monospace, monospace; text-align: right; }
+.pipeline-list { margin: 18px 0 0; border-top: 1px solid #303a38; }
+.pipeline-list div { display: flex; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid #303a38; font: 600 10px/1 ui-monospace, monospace; }
+.pipeline-list dt { color: #87948e; }.pipeline-list dd { margin: 0; text-transform: uppercase; }
+.author-studio-link { display: block; margin-top: 4px; padding: 12px; text-align: center; color: #dfe6df; background: #202928; border: 1px solid #36413f; border-radius: 4px; font: 700 11px/1 ui-monospace, monospace; text-decoration: none; }
+.author-studio-link:hover, .author-studio-link:focus-visible { border-color: #ff765f; color: #fff; }
+@keyframes pulse { to { opacity: .35; } }
+@media (max-width: 600px) {
+  .control-hint { display: none; }
+  .world-panel { top: 86px; right: 12px; width: calc(100vw - 24px); }
+  .hud-announce { top: max(46px, calc(env(safe-area-inset-top) + 34px)); }
+  .time-bar { width: min(240px, calc(100vw - 24px)); }
+}
+.maplibregl-ctrl-bottom-right {
+  display: none;
+}
+.world-inspector { position: fixed; top: 76px; right: 16px; z-index: 20; width: min(320px, calc(100vw - 32px)); max-height: calc(100vh - 100px); overflow: auto; padding: 14px; border: 1px solid rgba(92,224,255,.45); border-radius: 8px; background: rgba(8,16,18,.92); color: #e8f7f7; font: 12px/1.4 ui-monospace, monospace; pointer-events: auto; }
+.world-inspector h2 { margin: 8px 0; font-size: 16px; }
+.world-inspector dl, .world-inspector p { margin: 8px 0 0; }
+.world-inspector dl div { display: flex; gap: 12px; justify-content: space-between; }
+.world-inspector dt { color: rgba(232,247,247,.64); text-transform: capitalize; }
+.world-inspector dd { margin: 0; overflow-wrap: anywhere; text-align: right; }
+.world-inspector button { min-width: 44px; min-height: 44px; margin-top: 12px; }
+.world-inspector-crosshair { position: fixed; left: 50%; top: 50%; color: #5ce0ff; font-size: 24px; transform: translate(-50%,-50%); pointer-events: none; }
+
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+/* One line of small text in the corner, in place of the old brand block, the large
+   speed panel and the bottom-left status line. No panel, no border, no backdrop. */
+.hud-readout {
+  position: fixed;
+  top: max(14px, env(safe-area-inset-top));
+  left: max(14px, env(safe-area-inset-left));
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: rgba(244, 246, 239, .72);
+  font: 600 11px/1 ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .55);
+  pointer-events: none;
+}
+.hud-readout small { margin-left: 2px; opacity: .55; font-size: 9px; }
+.hud-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #7fe09b;
+  box-shadow: 0 0 8px #7fe09b;
+}
+.hud-dot.loading { background: #f3c96b; box-shadow: 0 0 8px #f3c96b; animation: pulse 1s infinite alternate; }
+.hud-dot.error { background: #ff715b; box-shadow: 0 0 8px #ff715b; }
+
+/* Centred white text with nothing behind it, fading in on each change. */
+.hud-announce {
+  position: fixed;
+  top: max(52px, calc(env(safe-area-inset-top) + 40px));
+  left: 50%;
+  z-index: 24;
+  transform: translateX(-50%);
+  width: min(560px, calc(100vw - 40px));
+  text-align: center;
+  pointer-events: none;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, .6);
+}
+.hud-announce p { margin: 0; animation: announce-in .5s ease both; }
+.hud-announce-area {
+  color: #fff;
+  font: 600 15px/1.2 Inter, ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: .02em;
+}
+.hud-announce-nearby {
+  margin-top: 4px !important;
+  color: rgba(255, 255, 255, .68);
+  font: 600 10px/1.3 ui-monospace, monospace;
+}
+@keyframes announce-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+/* Somebody talking to you. Sits above the action hint rather than with the announcements
+   at the top: what a person says belongs near them and near the key you pressed to hear
+   it, not up with the street names. No box — a border round it made it read as a system
+   message rather than as speech. */
+.hud-speech {
+  position: fixed;
+  left: 50%;
+  bottom: 124px;
+  z-index: 24;
+  transform: translateX(-50%);
+  width: min(620px, calc(100vw - 48px));
+  margin: 0;
+  color: #f4efe4;
+  font: 400 17px/1.45 Inter, ui-sans-serif, system-ui, sans-serif;
+  text-align: center;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, .85), 0 0 26px rgba(0, 0, 0, .6);
+  pointer-events: none;
+  animation: speech-in .45s ease both;
+}
+@keyframes speech-in { from { opacity: 0; transform: translate(-50%, 5px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* Time of day, on the main screen instead of inside the world panel. */
+/* Bottom left, not centred: the control hints wrap leftwards from the bottom right, and
+   a centred bar collides with them the moment the hint list gets long (freecam's does). */
+.time-bar {
+  position: fixed;
+  bottom: max(18px, calc(env(safe-area-inset-bottom) + 12px));
+  left: max(14px, env(safe-area-inset-left));
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: min(320px, calc(100vw - 40px));
+  pointer-events: auto;
+}
+.time-bar input[type="range"] { flex: 1; accent-color: #ff765f; cursor: pointer; }
+.time-bar-clock {
+  min-width: 40px;
+  color: rgba(244, 246, 239, .72);
+  font: 600 11px/1 ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .55);
+}
+.time-bar-auto {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: rgba(244, 246, 239, .8);
+  background: rgba(13, 20, 20, .55);
+  cursor: pointer;
+  font-size: 9px;
+  line-height: 1;
+}
+.time-bar-auto:hover, .time-bar-auto:focus-visible { color: #ff9b89; outline: none; }
+
+.hud-actions {
+  position: fixed;
+  top: max(14px, env(safe-area-inset-top));
+  right: max(64px, calc(env(safe-area-inset-right) + 56px));
+  z-index: 26;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: min(560px, calc(100vw - 360px));
+}
+
+.hud-actions button,
+.hud-restore {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid rgba(255,255,255,.25);
+  border-radius: 5px;
+  color: #f4f6ef;
+  background: rgba(13,20,20,.9);
+  cursor: pointer;
+  font: 800 10px/1 ui-monospace, monospace;
+}
+
+.hud-actions button[aria-pressed="true"] {
+  border-color: #5ce0ff;
+  color: #5ce0ff;
+}
+
+.hud-actions kbd { margin-left: 3px; color: #ff9b89; }
+
+/* Fullscreen is the one HUD action worth reaching for on sight, especially on a phone
+   where browser chrome eats real playfield space — give it its own accent so it does
+   not blend into the row of otherwise-equal buttons. */
+.hud-actions .hud-fullscreen {
+  border-color: #5ce0ff;
+  background: rgba(92, 224, 255, .16);
+  color: #eafcff;
+  font-weight: 900;
+}
+.hud-actions .hud-fullscreen:hover,
+.hud-actions .hud-fullscreen:focus-visible {
+  background: rgba(92, 224, 255, .3);
+}
+.hud-actions .hud-fullscreen[aria-pressed="true"] {
+  border-color: #5ce0ff;
+  background: rgba(92, 224, 255, .08);
+  color: #5ce0ff;
+}
+
+.hud-restore {
+  position: fixed;
+  top: max(14px, env(safe-area-inset-top));
+  right: max(12px, env(safe-area-inset-right));
+  z-index: 42;
+  width: 44px;
+  padding: 0;
+  border-color: #ff8a76;
+}
+
+.hud-visibility-menu {
+  position: fixed;
+  top: calc(max(14px, env(safe-area-inset-top)) + 52px);
+  right: max(12px, env(safe-area-inset-right));
+  z-index: 41;
+  width: min(250px, calc(100vw - 24px));
+  padding: 14px;
+  border: 1px solid rgba(255,255,255,.24);
+  border-radius: 7px;
+  background: rgba(10,16,17,.96);
+  box-shadow: 0 18px 50px rgba(0,0,0,.4);
+  font: 700 11px/1 ui-monospace, monospace;
+}
+
+.hud-visibility-menu > div,
+.hud-visibility-menu label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  gap: 12px;
+}
+
+.hud-visibility-menu button { min-width: 44px; min-height: 44px; }
+.hud-visibility-menu input { width: 44px; height: 24px; }
+
+button:focus-visible,
+[role="slider"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 2px;
+}
+
+@media (max-width: 760px) {
+  .hud-actions {
+    top: max(66px, calc(env(safe-area-inset-top) + 58px));
+    right: max(12px, env(safe-area-inset-right));
+    left: max(12px, env(safe-area-inset-left));
+    max-width: none;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    scrollbar-width: none;
+  }
+  .hud-actions button { flex: 0 0 auto; }
+  .world-panel {
+    inset: auto max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+    z-index: 40;
+    width: auto;
+    max-height: min(78dvh, 680px);
+    border-radius: 12px 12px 6px 6px;
+    overscroll-behavior: contain;
+  }
+  .action-hint { bottom: calc(max(12px, env(safe-area-inset-bottom)) + 126px); }
+}
+
+@media (pointer: coarse) {
+  .control-hint { display: none; }
+  /* Clear of the touch controls, which own the bottom of the screen. */
+  .time-bar { bottom: calc(max(12px, env(safe-area-inset-bottom)) + 120px); }
+}
+
+@media (pointer: coarse) and (orientation: landscape) {
+  .hud-actions { right: 64px; left: 140px; }
+  .action-hint { bottom: max(12px, env(safe-area-inset-bottom)); }
+  .time-bar { bottom: calc(max(12px, env(safe-area-inset-bottom)) + 76px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .hud-actions button,
+  .hud-restore,
+  .hud-visibility-menu,
+  .world-panel,
+  .action-hint {
+    border: 2px solid #fff;
+    background: #0b1010;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   The phone: a 1997 candybar handset, and the message that flashes on arrival.
+
+   Built from elements rather than an image so the screen can carry live text —
+   the inbox, the clock and the signal meter are all real content. The palette is
+   the era's: a green-grey STN panel that is legible mostly because the contrast
+   is bad, over a dark plastic shell.
+   --------------------------------------------------------------------------- */
+.hud-badge {
+  display: inline-block; min-width: 14px; margin-left: 5px; padding: 0 3px;
+  background: #ff4d3d; color: #fff; border-radius: 7px;
+  font: 700 9px/14px ui-monospace, monospace; text-align: center; vertical-align: middle;
+}
+
+.phone {
+  position: absolute; right: 18px; bottom: 96px; z-index: 6;
+  animation: phone-in .22s ease-out;
+}
+@keyframes phone-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+.phone-shell {
+  position: relative; width: 186px; padding: 14px 12px 12px;
+  background: linear-gradient(#3a3f42, #23272a 42%, #191c1e);
+  border: 1px solid #4a5054; border-radius: 16px 16px 20px 20px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .14);
+}
+/* The stub aerial. Every phone of the period had one and it is most of the
+   silhouette, so it is worth the eight lines of CSS. */
+.phone-antenna {
+  position: absolute; top: -16px; right: 20px; width: 7px; height: 18px;
+  background: linear-gradient(#2b2f31, #16191a); border-radius: 4px 4px 1px 1px;
+}
+.phone-earpiece {
+  width: 46px; height: 5px; margin: 0 auto 9px;
+  background: #14171a; border-radius: 3px; box-shadow: inset 0 1px 1px rgba(0, 0, 0, .8);
+}
+
+.phone-screen {
+  padding: 6px 7px; border-radius: 4px; outline: none;
+  background: #97a888; color: #1d2418;
+  border: 2px solid #14171a;
+  box-shadow: inset 0 0 12px rgba(29, 36, 24, .35);
+  font: 700 9px/1.35 ui-monospace, monospace; letter-spacing: .04em;
+}
+/* Torch on: the backlight goes with it, which is exactly what happened when you
+   held any key down on one of these in the dark. */
+.phone-screen-torch { background: #c8dcae; box-shadow: inset 0 0 12px rgba(29, 36, 24, .2), 0 0 16px rgba(220, 240, 190, .5); }
+.phone-screen:focus-visible { border-color: #7fd3ff; }
+
+.phone-status {
+  display: flex; align-items: flex-end; gap: 6px;
+  padding-bottom: 3px; margin-bottom: 4px; border-bottom: 1px solid rgba(29, 36, 24, .35);
+}
+.phone-signal { display: flex; align-items: flex-end; gap: 1px; }
+.phone-signal i { width: 2px; background: rgba(29, 36, 24, .22); }
+.phone-signal i.on { background: #1d2418; }
+.phone-carrier { flex: 1; font-size: 8px; letter-spacing: .12em; }
+.phone-clock { font-size: 8px; }
+
+.phone-body { min-height: 92px; }
+.phone-title { margin: 0 0 3px; font-size: 8px; letter-spacing: .1em; }
+.phone-empty { margin: 18px 0 0; text-align: center; opacity: .7; }
+.phone-list { list-style: none; margin: 0; padding: 0; max-height: 84px; overflow-y: auto; }
+.phone-list button {
+  display: flex; gap: 5px; width: 100%; padding: 2px 3px;
+  background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.phone-list button.selected { background: #1d2418; color: #97a888; }
+.phone-envelope { font-size: 8px; }
+.phone-notes { padding: 2px 3px; }
+.phone-notes li { padding: 3px 0; border-bottom: 1px solid rgba(29, 36, 24, .2); }
+.phone-notes li:last-child { border-bottom: none; }
+.phone-note-title { margin: 0 0 2px; font-size: 8px; letter-spacing: .06em; }
+.phone-note-body { margin: 0; font-weight: 400; opacity: .85; overflow-wrap: anywhere; }
+.phone-key-notes { color: #bcd9a3; }
+.phone-from { margin: 0 0 4px; font-size: 8px; letter-spacing: .08em; }
+.phone-text { margin: 0; font-weight: 400; overflow-wrap: anywhere; }
+
+.phone-soft {
+  display: flex; justify-content: space-between;
+  margin-top: 5px; padding-top: 3px; border-top: 1px solid rgba(29, 36, 24, .35);
+  font-size: 7px; letter-spacing: .1em;
+}
+
+.phone-keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-top: 10px; }
+.phone-key {
+  padding: 5px 0; border: 1px solid #4d5357; border-radius: 5px;
+  background: linear-gradient(#41474b, #2a2f32); color: #d7dde0;
+  font: 700 9px/1 ui-monospace, monospace; cursor: pointer;
+}
+.phone-key:hover { background: linear-gradient(#4b5155, #33383c); }
+.phone-key-end { color: #ff8f7f; }
+.phone-key-torch.on { background: linear-gradient(#c8b45a, #8d7c2f); color: #1d1a09; }
+.phone-pad {
+  grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px;
+  margin-top: 2px;
+}
+.phone-pad span {
+  padding: 4px 0; border: 1px solid #3d4245; border-radius: 4px;
+  background: linear-gradient(#383d40, #24282b); color: #8f979b;
+  font: 700 9px/1 ui-monospace, monospace; text-align: center;
+}
+
+/* The arrival. Just the text, centred, with no frame to dismiss. */
+.phone-toast {
+  position: absolute; left: 50%; top: 34%; z-index: 6;
+  width: min(440px, 74vw); transform: translateX(-50%);
+  text-align: center; pointer-events: none;
+  animation: phone-toast-in .35s ease-out both;
+}
+.phone-toast-from {
+  margin: 0 0 5px; color: #a8e6a0;
+  font: 700 10px/1 ui-monospace, monospace; letter-spacing: .22em;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, .9);
+}
+.phone-toast-text {
+  margin: 0; color: #fff;
+  font: 500 17px/1.35 ui-monospace, monospace;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, .95);
+}
+@keyframes phone-toast-in { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+@media (max-width: 720px) {
+  .phone { right: 10px; bottom: 150px; }
+  .phone-shell { width: 158px; }
+  .phone-toast { top: 26%; }
+  .phone-toast-text { font-size: 14px; }
+}
+
+/* Shared quiet presentation. The rendered world supplies colour; controls remain
+   monochrome and discrete across HUD, panels, maps, loading, and the phone. */
+.world-panel, .world-inspector, .hud-visibility-menu, .phone, .overlay-panel,
+.world-stream-progress, .action-hint {
+  border-color: var(--game-ui-border); border-radius: 0; color: var(--game-ui-text);
+  background: var(--game-ui-bg); box-shadow: none; font-family: inherit;
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+.world-curtain { font-family: inherit; }
+.world-loading-progress { color: var(--game-ui-muted); }
+.loading-verse, .hud-announce-area, .hud-speech { font-family: inherit; }
+.world-loading-progress progress, .world-stream-progress progress { accent-color: var(--game-ui-accent); }
+.panel-heading button, .source-switch button, .quality-switch button,
+.camera-switch button, .render-option, .render-option button, .btn-close, .preset-btn {
+  border: 1px solid var(--game-ui-border); border-radius: 0; color: var(--game-ui-muted);
+  background: var(--game-ui-panel); box-shadow: none; font-family: inherit;
+}
+.source-switch button[aria-pressed='true'], .quality-switch button[aria-pressed='true'],
+.camera-switch button[aria-pressed='true'], .render-option button[aria-checked='true'],
+.preset-btn:hover, .preset-btn:focus-visible {
+  border-color: var(--game-ui-accent); color: #080808; background: var(--game-ui-accent); box-shadow: none;
+}
+.panel-heading small, .render-section-title, .world-panel > p, .world-inspector dt,
+.hud-announce-nearby { color: var(--game-ui-muted); }
+
+@media (pointer: coarse), (max-width: 600px) {
+  .panel-heading button, .source-switch button, .quality-switch button,
+  .camera-switch button, .render-option button, .btn-close, .preset-btn { min-width: 44px; min-height: 44px; }
+  .world-panel {
+    top: auto; right: 0; bottom: 0; left: 0; width: 100%;
+    max-height: min(78dvh, calc(100dvh - env(safe-area-inset-top) - 56px));
+    padding: 16px max(14px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+    border-width: 1px 0 0;
+  }
+  .action-hint { bottom: max(96px, calc(env(safe-area-inset-bottom) + 84px)); }
+  .teleport-presets, .bus-route-bar { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+}

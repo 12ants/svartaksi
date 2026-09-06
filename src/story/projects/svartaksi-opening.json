@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "id": "svartaksi-opening",
+  "flags": [
+    "opening:read-first-message",
+    "opening:left-bus",
+    "bonfire:met",
+    "bonfire:kept-phone",
+    "bonfire:took-gps",
+    "errand:condolence-letter-found",
+    "errand:condolence-letter-posted",
+    "errand:groceries-bought",
+    "procrastination:started",
+    "procrastination:done",
+    "forest-rave:invited"
+  ],
+  "places": [{ "id": "ryssbergen-camp", "label": "Ryssbergen bonfire" }],
+  "beats": [
+    {
+      "id": "opening-ride",
+      "title": "Wake on the night bus",
+      "description": "Wake up on a self-driving night bus at an unknown location.",
+      "trigger": { "kind": "route-progress", "routeId": "opening-ride", "progress": 0 },
+      "requiredFlags": [],
+      "effects": [{ "kind": "set-flag", "flag": "opening:read-first-message" }]
+    },
+    {
+      "id": "meet-bonfire-pill",
+      "title": "Listen at the bonfire",
+      "trigger": { "kind": "near-place", "placeId": "ryssbergen-camp", "radiusMeters": 6 },
+      "requiredFlags": ["opening:left-bus"],
+      "effects": [
+        { "kind": "set-flag", "flag": "bonfire:met" },
+        {
+          "kind": "dialogue",
+          "lines": [
+            { "id": "bonfire-bus-1", "speakerId": "bonfire-pill-1", "text": "You came on the bus. Everyone comes on the bus." },
+            { "id": "bonfire-bus-2", "speakerId": "bonfire-pill-1", "text": "Nobody has got off at the Forum since the timetable changed." },
+            { "id": "bonfire-bus-3", "speakerId": "bonfire-pill-1", "text": "The timetable did not change." }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "forest-rave-invite",
+      "title": "Forest rave",
+      "description": "An unsigned text names a rave in the woods tonight. It does not give an address — it does not need to, because the fire it is describing is the one already burning at Ryssbergen.",
+      "trigger": { "kind": "phone-message", "messageId": "forest-rave-invite" },
+      "requiredFlags": [],
+      "effects": [
+        { "kind": "set-flag", "flag": "forest-rave:invited" },
+        {
+          "kind": "dialogue",
+          "lines": [
+            { "id": "forest-rave-1", "speakerId": "narrator", "text": "Skogsrave vid Ryssbergen ikvall. Elden ar redan tand." },
+            { "id": "forest-rave-2", "speakerId": "narrator", "text": "There is only one fire out there. You already know the one." }
+          ]
+        }
+      ]
+    }
+  ]
+}
