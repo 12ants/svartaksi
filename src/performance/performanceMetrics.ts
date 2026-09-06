@@ -97,12 +97,18 @@ export function createPerformanceSampler({ capacity, clock = defaultClock }: Per
     throw new RangeError('capacity must be a positive safe integer');
   }
 
-  let samples: PerformanceSample[] = [];
+  let slots = new Array<PerformanceSample>(capacity);
+  let writeIndex = 0;
+  let count = 0;
   let startedAtMs: number | null = null;
 
-  const copySamples = () => samples.map(cloneSample);
+  const copySamples = () => Array.from({ length: count }, (_, offset) => {
+    const index = (writeIndex - count + capacity + offset) % capacity;
+    return cloneSample(slots[index]);
+  });
   const createSnapshot = (environment: PerformanceEnvironment): PerformanceSnapshot => {
-    const endedAtMs = samples.at(-1)?.timestampMs ?? startedAtMs ?? clock.now();
+    const newestIndex = (writeIndex - 1 + capacity) % capacity;
+    const endedAtMs = (count > 0 ? slots[newestIndex].timestampMs : null) ?? startedAtMs ?? clock.now();
     requireFinite(endedAtMs, 'clock.now()');
     return {
       environment: { ...environment, viewport: { ...environment.viewport } },
@@ -124,11 +130,14 @@ export function createPerformanceSampler({ capacity, clock = defaultClock }: Per
       const timestampMs = clock.now();
       requireFinite(timestampMs, 'clock.now()');
       if (startedAtMs === null) startedAtMs = timestampMs;
-      samples.push({ timestampMs, frameMs, renderBudgetScale });
-      if (samples.length > capacity) samples.shift();
+      slots[writeIndex] = { timestampMs, frameMs, renderBudgetScale };
+      writeIndex = (writeIndex + 1) % capacity;
+      count = Math.min(count + 1, capacity);
     },
     reset() {
-      samples = [];
+      slots = new Array<PerformanceSample>(capacity);
+      writeIndex = 0;
+      count = 0;
       startedAtMs = null;
     },
     snapshot(environment) {

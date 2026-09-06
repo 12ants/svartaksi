@@ -103,7 +103,9 @@ if (++operations % 256 === 0) yield;
 **Scope:** Capture overhead only. `recordFrame` already returns immediately when capture
 is inactive; do not claim an ordinary gameplay optimization.
 
-- [ ] Add wraparound/reset/isolation tests in the existing suite using its `environment` fixture. Preserve the existing meaning of `startedAtMs` as capture start even when early samples are evicted.
+- [x] Add wraparound/reset/isolation tests in the existing suite using its `environment` fixture. Preserve the existing meaning of `startedAtMs` as capture start even when early samples are evicted.
+
+  **Result 2026-09-06:** `performanceMetrics.test.ts` now covers multiple wraps, chronological snapshots, the original capture start, reset, and snapshot mutation isolation.
 
 ```ts
 const capture = createPerformanceSampler({ capacity: 2, clock: { now: () => 10 } });
@@ -116,7 +118,7 @@ capture.reset();
 expect(capture.snapshot(environment).samples).toEqual([]);
 ```
 
-- [ ] Replace push/shift storage with a fixed-capacity array, write index, and count. Insert in O(1); allocate ordered copies only when snapshot/report is requested.
+- [x] Replace push/shift storage with a fixed-capacity array, write index, and count. Insert in O(1); allocate ordered copies only when snapshot/report is requested.
 
 ```ts
 const slots = new Array<PerformanceSample>(capacity);
@@ -129,9 +131,13 @@ count = Math.min(count + 1, capacity);
 // Snapshot order: (writeIndex - count + capacity + i) % capacity, i in [0, count).
 ```
 
-- [ ] Reset indices, count, and start time. Read the newest timestamp through the ring index. Keep deep-enough snapshot isolation, validation, percentile semantics, and JSON schema identical.
-- [ ] Existing functional tests may already pass before this optimization; use source inspection or an isolated insertion microbenchmark to establish removal of linear shifting. Do not add flaky timing thresholds to Vitest or pretend a behavior-preserving change must fail a functional test first.
-- [ ] Run `pnpm test -- tests/performance`, `pnpm test:all`, and `pnpm build`; commit as `perf: use circular storage for capture samples`.
+- [x] Reset indices, count, and start time. Read the newest timestamp through the ring index. Keep deep-enough snapshot isolation, validation, percentile semantics, and JSON schema identical.
+- [x] Existing functional tests may already pass before this optimization; use source inspection or an isolated insertion microbenchmark to establish removal of linear shifting. Do not add flaky timing thresholds to Vitest or pretend a behavior-preserving change must fail a functional test first.
+
+  **Result 2026-09-06:** source inspection confirms `recordFrame` now performs one indexed assignment and constant-time index/count updates; the former `samples.shift()` is absent. Ordered cloning happens only in snapshot/report paths. No timing threshold was added.
+- [x] Run `pnpm test -- tests/performance`, `pnpm test:all`, and `pnpm build`; commit as `perf: use circular storage for capture samples`.
+
+  **Result 2026-09-06:** 17 focused performance tests passed; repository validation passed with 144 test files and 1,458 tests, and the production build succeeded. The existing large-chunk warning remains. This reduces overhead only while capture is active; no gameplay FPS claim is made.
 
 ## Task 4: Conditional allocation and visibility work
 
