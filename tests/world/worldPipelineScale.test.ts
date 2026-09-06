@@ -103,8 +103,11 @@ describe('findRoadCrossings at snapshot scale', () => {
     // genuinely does have hundreds of candidates — far denser than the real snapshot,
     // where this call measures ~200ms. The pair enumeration this replaced took 26 s on
     // the same input, so the budget is set to catch that returning rather than to pin
-    // down the exact cost of an adversarial fixture on a contended worker.
-    expect(elapsedMs).toBeLessThan(5_000);
+    // down the exact cost of an adversarial fixture on a contended worker. It sits at
+    // 15 s because 5 s was under, not over, what this fixture costs on a machine running
+    // the rest of the suite beside it — a wall clock reading is only meaningful here to
+    // the order of magnitude that separates 200 ms from 26 s.
+    expect(elapsedMs).toBeLessThan(15_000);
   });
 
   it('finds every crossing a one-special-road-at-a-time search finds, and no others', () => {

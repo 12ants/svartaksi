@@ -1,3 +1,4 @@
+import { configure } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 
 const canvasContext = {
@@ -65,3 +66,13 @@ if (!window.localStorage) {
   Object.defineProperty(window, 'localStorage', { configurable: true, value: storage });
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
 }
+
+// App's overlays and the author tools are React.lazy, so findBy* queries wait on a
+// dynamic import rather than on a render. Testing Library's 1 s default is enough when a
+// file runs alone but not when 140-odd test files share the CPU, which made those queries
+// fail as a function of machine load rather than of behaviour. The worst of them — the
+// World Editor, which pulls three.js in behind it — takes ~3 s unloaded, so 15 s is the
+// headroom that keeps it a behaviour check rather than a race against the scheduler. It
+// stays well under the testTimeout in vitest.config.ts, so a query that really never
+// resolves still fails by naming the element it could not find.
+configure({ asyncUtilTimeout: 15_000 });

@@ -18,6 +18,11 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    // Comfortably above the 15 s asyncUtilTimeout set in src/test/setup.ts. A findBy*
+    // query that waits its full budget has to be able to report that as a query failure;
+    // when the two are equal — as they were — Vitest kills the test first and the suite
+    // reports a bare timeout instead of naming the element that never appeared.
+    testTimeout: 30_000,
     setupFiles: ['./src/test/setup.ts'],
     include: [
       'tests/App.test.tsx',

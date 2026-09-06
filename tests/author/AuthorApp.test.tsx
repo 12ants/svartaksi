@@ -10,6 +10,7 @@ describe('AuthorApp', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Story Editor' }));
     expect(screen.getByRole('heading', { name: 'Story Editor' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'World Editor' }));
-    expect(await screen.findByRole('heading', { name: 'World Editor' }, { timeout: 5_000 })).toBeInTheDocument();
+    // The World Editor is lazy-loaded; the wait for it is the global asyncUtilTimeout.
+    expect(await screen.findByRole('heading', { name: 'World Editor' })).toBeInTheDocument();
   });
 });
