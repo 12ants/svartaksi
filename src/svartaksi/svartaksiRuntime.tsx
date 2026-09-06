@@ -107,7 +107,7 @@ import {
 import { INSPECTION_USER_DATA_KEY, type WorldInspectionRecord } from '../world/inspection';
 import { highlightGeometryForIntersection, recordForIntersection } from './worldInspector';
 import { createWorldDataCache } from '../world/worldDataCache';
-import { predictStreamCenter } from '../world/streamPrediction';
+import { predictStreamCenter, shouldRestream } from '../world/streamPrediction';
 import {
   BUS_DOOR_BACK_Z,
   BUS_DOOR_FRONT_Z,
@@ -1054,7 +1054,12 @@ function WorldScene({
   const labelsRef = useRef<WorldLabel[]>([]);
   const currentDataRef = useRef<WorldData | null>(null);
   const activeSourceRef = useRef<WorldSource>('maplibre');
+  /** Where the player stood when the world was last streamed — the point travel is
+   * measured from. Distinct from the centre that stream was aimed at (below). */
   const streamAnchorRef = useRef(new THREE.Vector2(0, 0));
+  /** Where the last stream was centred: the look-ahead point at the moment it was
+   * requested, and so the centre of the data currently loaded. */
+  const streamedCenterRef = useRef(new THREE.Vector2(0, 0));
   const lastStreamCheckRef = useRef(0);
   const lastVisibilityCheckRef = useRef(0);
   const generationRef = useRef(0);
@@ -1602,6 +1607,7 @@ function WorldScene({
       if (!canRelocateWorld(busLifecycleRef.current)) return;
       activeSourceRef.current = source;
       streamAnchorRef.current.set(0, 0);
+      streamedCenterRef.current.set(0, 0);
       loadWorld(source, START_LOCATION, false);
     };
 
@@ -3875,8 +3881,19 @@ function WorldScene({
           }
         }
 
-        if (streamAnchorRef.current.distanceTo(new THREE.Vector2(focusX, focusZ)) > STREAM_RESTREAM_DISTANCE) {
-          streamAnchorRef.current.set(focusX, focusZ);
+        // The anchor is where the player *was* when the world was last streamed, and the
+        // centre is where that stream was centred — two different points, because the load
+        // is deliberately biased forward. Keeping both is what lets the trigger tell
+        // travelling apart from turning; see shouldRestream.
+        if (shouldRestream(
+          { x: active.position.x, z: active.position.z },
+          { x: focusX, z: focusZ },
+          { x: streamAnchorRef.current.x, z: streamAnchorRef.current.y },
+          { x: streamedCenterRef.current.x, z: streamedCenterRef.current.y },
+          { travelDistance: STREAM_RESTREAM_DISTANCE, coverageRadius: WORLD_DATA_RADIUS.terrain },
+        )) {
+          streamAnchorRef.current.set(active.position.x, active.position.z);
+          streamedCenterRef.current.set(focusX, focusZ);
           loadWorldRef.current('maplibre', localToLngLat(START_LOCATION, { x: focusX, z: focusZ }), true);
         }
       }
