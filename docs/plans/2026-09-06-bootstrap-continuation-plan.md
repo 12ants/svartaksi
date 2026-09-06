@@ -101,8 +101,10 @@ expect(wheel.steer.rotation.y).toBeCloseTo(0.2);
 **Files:** modify `src/svartaksi/busShell.ts`, inspect `src/svartaksi/busModel.ts` disposal
 and runtime cleanup; extend `tests/svartaksi/busShell.test.ts`.
 
-- [ ] Mock a loader result with an interior-only geometry, a shared material, and a retained exterior mesh. Spy on each resource's `dispose`; verify detached interiors and retained resources are released once, repeated shell disposal is inert, and live shared materials are not disposed during interior removal.
-- [ ] Collect unique geometry/material resources before removing interior meshes. Add any newly split geometries to the same owner. Keep detached resources owned until teardown, or release only those proved exclusive to discarded meshes.
+- [x] Mock a loader result with an interior-only geometry, a shared material, and a retained exterior mesh. Spy on each resource's `dispose`; verify detached interiors and retained resources are released once, repeated shell disposal is inert, and live shared materials are not disposed during interior removal.
+  **Result 2026-09-06:** five tests in `tests/svartaksi/busShell.test.ts`, against a `createBusShell` seam that takes an already-loaded scene, so no loader, network or GPU is involved.
+- [x] Collect unique geometry/material resources before removing interior meshes. Add any newly split geometries to the same owner. Keep detached resources owned until teardown, or release only those proved exclusive to discarded meshes.
+  **Result 2026-09-06:** ownership is taken from the whole loaded scene before anything is detached, the split's geometries join the same set, and teardown walks the set rather than the tree. Nothing is released during interior removal.
 
 ```ts
 const geometries = new Set<THREE.BufferGeometry>();
@@ -117,9 +119,12 @@ const disposeOwned = () => {
 };
 ```
 
-- [ ] Ensure only one owner traverses/disposes the attached shell: inspect the bus model's existing cleanup and detach or exclude shell resources before that traversal. Cover both normal teardown and a load resolving after runtime disposal.
-- [ ] Current `bus1.glb` contains zero textures. Do not add generic texture scanning for a nonexistent problem; add explicit texture ownership if a future asset introduces them.
-- [ ] Run the shell/model suites, `pnpm test:all`, and `pnpm build`; commit independently as `fix: own bus shell resources through teardown`.
+- [x] Ensure only one owner traverses/disposes the attached shell: inspect the bus model's existing cleanup and detach or exclude shell resources before that traversal. Cover both normal teardown and a load resolving after runtime disposal.
+  **Result 2026-09-06:** found a real double-dispose — `disposeBus` traverses the whole bus group, which since the bootstrap has included the attached shell, so the runtime's `busModel.dispose()` followed by `busShell.dispose()` disposed every shell resource twice. `createBusModel`'s teardown now hands the shell back to its owner before sweeping. Both paths tested; the late-load path was already correct in the runtime and is now covered.
+- [x] Current `bus1.glb` contains zero textures. Do not add generic texture scanning for a nonexistent problem; add explicit texture ownership if a future asset introduces them.
+  **Result 2026-09-06:** no texture scanning added. Confirmed zero textures and zero images by `scripts/inspect-bus-glb.mjs`; `loadBusShell` says so and says what to do if that changes.
+- [x] Run the shell/model suites, `pnpm test:all`, and `pnpm build`; commit independently as `fix: own bus shell resources through teardown`.
+  **Result 2026-09-06:** shell/model/wheel suites 69 passing; lint clean, `tsc --noEmit` clean, 1,456 tests passing, `pnpm build` succeeded.
 
 ## Task 4: Optional camera-only runtime extraction
 

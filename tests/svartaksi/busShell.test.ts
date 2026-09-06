@@ -1,6 +1,12 @@
 import * as THREE from 'three';
-import { describe, expect, it } from 'vitest';
-import { assembleBusShell, BUS_ASSET_SIZE, busShellScale, setLampIntensity } from '@/svartaksi/busShell';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  assembleBusShell,
+  BUS_ASSET_SIZE,
+  busShellScale,
+  createBusShell,
+  setLampIntensity,
+} from '@/svartaksi/busShell';
 import {
   applyBusShell,
   BUS_SHELL_MESH_NAMES,
@@ -282,5 +288,128 @@ describe('assembleBusShell', () => {
     expect(frontLeft.restCenter.y).toBeCloseTo(0.4654 * scale.y, 3);
     expect(frontLeft.restCenter.z).toBeCloseTo(2.7164 * scale.z, 3);
     expect(frontLeft.suspensionIndex).toBe(4);
+  });
+});
+
+describe('bus shell resource ownership', () => {
+  /**
+   * A stand-in for what the loader hands back: an interior nobody keeps, an exterior that
+   * shares the interior's material, and the running gear the split takes apart.
+   */
+  function loadedScene() {
+    const shared = new THREE.MeshStandardMaterial({ name: 'body' });
+    const wheelMaterial = new THREE.MeshStandardMaterial({ name: 'wheel' });
+    const interiorMaterial = new THREE.MeshStandardMaterial({ name: 'interior' });
+    const interiorGeometry = new THREE.BoxGeometry(1, 1, 1);
+    const exteriorGeometry = new THREE.BoxGeometry(2, 2, 2);
+
+    const hubs = [
+      { x: -1.0936, y: 0.4654, z: -2.4555 },
+      { x: 1.0933, y: 0.4654, z: -2.4555 },
+      { x: -1.0936, y: 0.4654, z: 2.7164 },
+      { x: 1.0933, y: 0.4654, z: 2.7164 },
+    ];
+    const positions: number[] = [];
+    for (const hub of hubs) {
+      for (let i = 0; i < 8; i += 1) {
+        const [a, b] = [(i / 8) * Math.PI * 2, ((i + 1) / 8) * Math.PI * 2];
+        const ring = (angle: number, x: number) => [
+          x, hub.y + Math.cos(angle) * 0.4, hub.z + Math.sin(angle) * 0.4,
+        ];
+        positions.push(
+          ...ring(a, hub.x - 0.15), ...ring(b, hub.x - 0.15), ...ring(a, hub.x + 0.15),
+          ...ring(b, hub.x - 0.15), ...ring(b, hub.x + 0.15), ...ring(a, hub.x + 0.15),
+        );
+      }
+    }
+    const wheelGeometry = new THREE.BufferGeometry();
+    wheelGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+
+    const root = new THREE.Group();
+    // The interior mesh carries the interior material, and shares nothing with the body;
+    // the exterior mesh carries the shared one. Both are dropped by name, not by geometry.
+    const interior = new THREE.Mesh(interiorGeometry, interiorMaterial);
+    root.add(interior, new THREE.Mesh(exteriorGeometry, shared), new THREE.Mesh(wheelGeometry, wheelMaterial));
+
+    const spies = new Map<string, ReturnType<typeof vi.spyOn>>();
+    const watch = (name: string, resource: { dispose: () => void }) => {
+      spies.set(name, vi.spyOn(resource, 'dispose'));
+    };
+    watch('interiorGeometry', interiorGeometry);
+    watch('exteriorGeometry', exteriorGeometry);
+    watch('wheelGeometry', wheelGeometry);
+    watch('shared', shared);
+    watch('wheelMaterial', wheelMaterial);
+    watch('interiorMaterial', interiorMaterial);
+
+    return { root, spies, shared, interiorGeometry };
+  }
+
+  it('keeps a material the body still uses alive when the interior is dropped', () => {
+    const { root, spies } = loadedScene();
+
+    const shell = createBusShell(root);
+
+    // Nothing is released while the shell is being built: the interior is detached, not
+    // destroyed, and a material it happened to share would still be on the body.
+    for (const [name, spy] of spies) expect(spy, name).not.toHaveBeenCalled();
+    expect(shell.group.getObjectByName('bus:shell-body')).toBeDefined();
+  });
+
+  it('releases the detached interior, the retained body and the split wheels exactly once', () => {
+    const { root, spies } = loadedScene();
+    const shell = createBusShell(root);
+    const created: THREE.BufferGeometry[] = [];
+    for (const wheel of shell.wheels) {
+      wheel.roll.traverse((object) => { if (object instanceof THREE.Mesh) created.push(object.geometry); });
+    }
+    const createdSpies = created.map((geometry) => vi.spyOn(geometry, 'dispose'));
+
+    shell.dispose();
+
+    // The interior is no longer in the scene, and the wheel source mesh was emptied out
+    // of it, so neither is reachable by traversal — both are still owned.
+    for (const [name, spy] of spies) expect(spy, name).toHaveBeenCalledTimes(1);
+    for (const spy of createdSpies) expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('is inert when disposed twice', () => {
+    const { root, spies } = loadedScene();
+    const shell = createBusShell(root);
+
+    shell.dispose();
+    shell.dispose();
+    shell.dispose();
+
+    for (const [name, spy] of spies) expect(spy, name).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases everything when the load lands after the runtime is gone', () => {
+    const { root, spies } = loadedScene();
+
+    // The runtime's `.then` disposes a shell it never attached; nothing else ever will.
+    const shell = createBusShell(root);
+    shell.dispose();
+
+    for (const [name, spy] of spies) expect(spy, name).toHaveBeenCalledTimes(1);
+    expect(shell.group.parent).toBeNull();
+  });
+
+  it('leaves the shell to its own owner when the bus model is disposed', () => {
+    const { root, spies } = loadedScene();
+    const shell = createBusShell(root);
+    const model = createBusModel();
+    applyBusShell(model, shell);
+
+    model.dispose();
+
+    // The bus disposes the procedural body it built and nothing the shell brought: two
+    // owners traversing one tree is how a shared material gets disposed out from under a
+    // live mesh.
+    for (const [name, spy] of spies) expect(spy, name).not.toHaveBeenCalled();
+    expect(shell.group.parent).toBeNull();
+
+    shell.dispose();
+    for (const [name, spy] of spies) expect(spy, name).toHaveBeenCalledTimes(1);
   });
 });

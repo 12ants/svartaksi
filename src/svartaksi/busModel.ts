@@ -900,13 +900,20 @@ export function createBusModel(): BusModel {
     dispose() {
       if (disposed) return;
       disposed = true;
+      // The modelled shell is owned by whoever loaded it (busShell.ts), which disposes
+      // its geometries and materials itself — including the ones it detached and the
+      // traversal below could not reach. Handing it back before the sweep is what keeps
+      // exactly one owner per resource: two owners walking one tree is how a material
+      // shared with a live mesh gets disposed out from under it.
+      shellBindings.get(model)?.group?.removeFromParent();
       disposeBus(group);
     },
   };
 
   nightLampMaterials.set(model, [markerLampMaterial, tailLampMaterial]);
   doorLeafGroups.set(model, doorLeaves);
-  shellWheelBindings.set(model, {
+  shellBindings.set(model, {
+    group: null,
     wheels: [],
     state: { leftSteer: 0, rightSteer: 0, rollRadians: 0, travel: [] },
   });
@@ -932,11 +939,14 @@ const doorLeafGroups = new WeakMap<BusModel, [THREE.Group, THREE.Group]>();
  * moment it lands, so a bus that was already at half lock does not snap its new wheels
  * straight for a frame.
  */
-interface BusShellWheelBinding {
+interface BusShellBinding {
+  /** The attached shell's root, or null while the bus is still wearing its own skin.
+   * Held so teardown can hand the shell back to its owner rather than disposing it. */
+  group: THREE.Object3D | null;
   wheels: readonly BusShellWheel[];
   state: BusShellWheelState;
 }
-const shellWheelBindings = new WeakMap<BusModel, BusShellWheelBinding>();
+const shellBindings = new WeakMap<BusModel, BusShellBinding>();
 
 
 /**
@@ -974,7 +984,7 @@ export function setBusSteer(model: BusModel, angle: number): void {
   rightWheel.rotation.y = right;
   // The authored wheels take the same two angles rather than re-deriving them: one
   // Ackermann split per frame, and no way for the two sets of wheels to disagree.
-  const binding = shellWheelBindings.get(model);
+  const binding = shellBindings.get(model);
   if (binding) {
     binding.state.leftSteer = left;
     binding.state.rightSteer = right;
@@ -996,7 +1006,7 @@ export function setBusSteer(model: BusModel, angle: number): void {
  */
 export function setBusWheelRoll(model: BusModel, radians: number): void {
   for (const wheel of model.wheelRoll) wheel.rotation.x = radians;
-  const binding = shellWheelBindings.get(model);
+  const binding = shellBindings.get(model);
   if (binding) {
     binding.state.rollRadians = radians;
     updateBusShellWheels(binding.wheels, binding.state);
@@ -1032,7 +1042,7 @@ export function setBusWheelTravel(model: BusModel, travel: readonly number[]): v
   // The authored wheels read the same array through their own suspensionIndex: the asset
   // has four wheels where the sheet has six, so each rear one takes the travel of the
   // outer wheel of its dual pair.
-  const binding = shellWheelBindings.get(model);
+  const binding = shellBindings.get(model);
   if (binding) {
     binding.state.travel = travel;
     updateBusShellWheels(binding.wheels, binding.state);
@@ -1191,8 +1201,9 @@ export function applyBusShell(
 ): void {
   setProceduralShellVisible(model, false);
   model.group.add(shell.group);
-  const binding = shellWheelBindings.get(model);
+  const binding = shellBindings.get(model);
   if (binding) {
+    binding.group = shell.group;
     binding.wheels = shell.wheels ?? [];
     // Replay the running gear's current state, since the shell may have landed mid-ride.
     updateBusShellWheels(binding.wheels, binding.state);

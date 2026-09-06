@@ -118,7 +118,7 @@ export function assembleBusShell(
 }
 
 /**
- * Loads the shell, fitted and ready to add to the bus group.
+ * Builds the shell from an already-loaded scene, and takes ownership of everything in it.
  *
  * The asset's interior is dropped: the saloon the player actually walks around in is the
  * procedural one, built to the aisle and seat colliders the rider is clamped against, and
@@ -126,13 +126,32 @@ export function assembleBusShell(
  * before the wheel split so the split never has to reason about geometry that is on its
  * way out.
  *
+ * **Ownership is taken before anything is detached.** Removing an object from a scene does
+ * not release its geometry or its material, so a shell that disposed by traversing itself
+ * would leak exactly what it threw away — the interior, and the rim mesh the wheel split
+ * empties. The resources are therefore collected from the whole loaded scene first, the
+ * split's own geometries are added to the same set, and teardown walks the set rather than
+ * the tree. Nothing is released while the shell is being built: an interior material may
+ * be an exterior material too, and disposing it on the way past would take the body's
+ * paint with it. See https://threejs.org/manual/en/how-to-dispose-of-objects.html.
+ *
  * Rejects an asset whose wheels it cannot find: `busShellWheels` throws rather than
  * installing a bus with holes where its running gear was, and the runtime's `.catch`
  * keeps the whole procedural bus — which does have turning wheels.
  */
-export async function loadBusShell(): Promise<BusShell> {
-  const gltf = await gltfLoader().loadAsync(MODEL_URL);
-  const root = gltf.scene;
+export function createBusShell(
+  root: THREE.Object3D,
+  hubs: readonly BusShellWheelHub[] = BUS_SHELL_WHEEL_HUBS,
+): BusShell {
+  const geometries = new Set<THREE.BufferGeometry>();
+  const materials = new Set<THREE.Material>();
+  root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    geometries.add(object.geometry);
+    for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+      if (material) materials.add(material);
+    }
+  });
 
   for (const mesh of findMeshesByMaterialName(root, 'interior')) mesh.removeFromParent();
 
@@ -149,24 +168,39 @@ export async function loadBusShell(): Promise<BusShell> {
     indicator: lampMaterial(root, 'turnlght'),
   };
 
-  const { group, wheels, geometries } = assembleBusShell(root, busShellScale());
+  const assembled = assembleBusShell(root, busShellScale(), hubs);
+  for (const geometry of assembled.geometries) geometries.add(geometry);
 
+  let disposed = false;
   return {
-    group,
-    wheels,
+    group: assembled.group,
+    wheels: assembled.wheels,
     lamps,
     dispose() {
-      group.traverse((object) => {
-        if (!(object instanceof THREE.Mesh)) return;
-        object.geometry.dispose();
-        const materials = Array.isArray(object.material) ? object.material : [object.material];
-        for (const material of materials) material.dispose();
-      });
-      // The split leaves the rim mesh empty and detached, so its geometry is no longer
-      // reachable from the traversal above.
+      if (disposed) return;
+      disposed = true;
+      assembled.group.removeFromParent();
       for (const geometry of geometries) geometry.dispose();
+      for (const material of materials) material.dispose();
     },
   };
+}
+
+/**
+ * Fetches the asset and builds the shell from it.
+ *
+ * Deliberately thin: everything that can be wrong about the shell — where the scale sits,
+ * which triangles are a wheel, which resources it owns — lives in `createBusShell` and
+ * `assembleBusShell`, where a test can reach it without a network or a GPU.
+ *
+ * Note that the asset carries **no textures**, so nothing here scans for them. If a future
+ * export brings some, they need adding to the owned set explicitly; a generic material
+ * walk that guesses at texture-shaped properties would be a solution to a problem this
+ * asset does not have.
+ */
+export async function loadBusShell(): Promise<BusShell> {
+  const gltf = await gltfLoader().loadAsync(MODEL_URL);
+  return createBusShell(gltf.scene);
 }
 
 /** The first standard material under `root` with this name, prepared to glow. */
