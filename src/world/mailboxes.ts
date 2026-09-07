@@ -41,15 +41,12 @@ const MIN_ROAD_LENGTH = 150;
  * generated furniture. */
 const MIN_SEPARATION = 40;
 
-function roadLength(road: WorldRoad): number {
-  let total = 0;
-  for (let index = 0; index < road.points.length - 1; index += 1) {
-    const a = road.points[index];
-    const b = road.points[index + 1];
-    total += Math.hypot(b.x - a.x, b.z - a.z);
-  }
-  return total;
-}
+/**
+ * Loop iterations per yield — the same 256 the lamp, tree and shelter walks use, counted
+ * over every inner loop rather than per road. See BUS_STOP_OP_CHUNK for why the count is
+ * per operation: one long road is a single outer iteration and hundreds of candidates.
+ */
+const MAILBOX_OP_CHUNK = 256;
 
 /**
  * Walks each qualifying road and drops a box every MAILBOX_SPACING meters, always on
@@ -61,17 +58,30 @@ function roadLength(road: WorldRoad): number {
  * `avoid` is other street furniture already placed (the bus shelters) — a box is pushed
  * to the next spacing rather than planted inside one.
  */
-export function generateMailboxes(
+export function* generateMailboxesJob(
   roads: WorldRoad[],
   avoid: readonly { x: number; z: number }[] = [],
   buildings: WorldBuilding[] = [],
-): MailboxPlacement[] {
+): Generator<void, MailboxPlacement[], void> {
   const boxes: MailboxPlacement[] = [];
+  // Pausing changes nothing: `sinceLast` and the id-derived `side` are per road, the
+  // clearance query is read-only, and the separation check reads `boxes` as it stands —
+  // which, since boxes are only ever appended in walk order, is the same set at the same
+  // point of the walk whether or not the frame was handed back in between.
+  let operations = 0;
   for (const road of roads) {
+    if (++operations % MAILBOX_OP_CHUNK === 0) yield;
     if (getRoadFamily(road.kind) === 'path') continue;
     if (!MAILBOX_ROAD_KINDS.has(road.kind)) continue;
     if (road.points.length < 2) continue;
-    if (roadLength(road) < MIN_ROAD_LENGTH) continue;
+    let length = 0;
+    for (let index = 0; index < road.points.length - 1; index += 1) {
+      if (++operations % MAILBOX_OP_CHUNK === 0) yield;
+      const a = road.points[index];
+      const b = road.points[index + 1];
+      length += Math.hypot(b.x - a.x, b.z - a.z);
+    }
+    if (length < MIN_ROAD_LENGTH) continue;
     const offset = road.width / 2 + MAILBOX_SETBACK;
     // Deterministic per road, so a stream or a quality change never shuffles boxes
     // across the street while the player is looking at them.
@@ -83,6 +93,7 @@ export function generateMailboxes(
     // whole spacing of a short street.
     let sinceLast = (MAILBOX_SPACING * 2) / 3;
     for (let index = 0; index < road.points.length - 1; index += 1) {
+      if (++operations % MAILBOX_OP_CHUNK === 0) yield;
       const a = road.points[index];
       const b = road.points[index + 1];
       const dx = b.x - a.x;
@@ -95,6 +106,7 @@ export function generateMailboxes(
       const normalZ = dirX;
       let traveled = 0;
       while (sinceLast + (segmentLength - traveled) >= MAILBOX_SPACING) {
+        if (++operations % MAILBOX_OP_CHUNK === 0) yield;
         traveled += MAILBOX_SPACING - sinceLast;
         const x = a.x + dirX * traveled + normalX * offset * side;
         const z = a.z + dirZ * traveled + normalZ * offset * side;
@@ -122,12 +134,21 @@ export function generateMailboxes(
  * With no road anywhere near, the box keeps yaw 0 rather than being dropped — an
  * unaligned box still beats no box where a surveyor put one.
  */
-export function mappedMailboxes(points: readonly LocalPoint[], roads: WorldRoad[]): MailboxPlacement[] {
-  return points.map((point) => {
+export function* mappedMailboxesJob(
+  points: readonly LocalPoint[],
+  roads: WorldRoad[],
+): Generator<void, MailboxPlacement[], void> {
+  const placements: MailboxPlacement[] = [];
+  // The nearest-road search is per point and read-only, so a pause anywhere inside it
+  // cannot change which segment wins or the order the boxes come out in.
+  let operations = 0;
+  for (const point of points) {
     let bestDistance = Infinity;
     let yaw = 0;
     for (const road of roads) {
+      if (++operations % MAILBOX_OP_CHUNK === 0) yield;
       for (let index = 0; index < road.points.length - 1; index += 1) {
+        if (++operations % MAILBOX_OP_CHUNK === 0) yield;
         const a = road.points[index];
         const b = road.points[index + 1];
         const dx = b.x - a.x;
@@ -146,6 +167,31 @@ export function mappedMailboxes(points: readonly LocalPoint[], roads: WorldRoad[
         yaw = distance < 1e-6 ? 0 : Math.atan2(offsetX, offsetZ);
       }
     }
-    return { x: point.x, z: point.z, yaw };
-  });
+    placements.push({ x: point.x, z: point.z, yaw });
+  }
+  return placements;
+}
+
+/**
+ * The all-at-once forms, for callers with no frame to protect (tests, tools, fixtures).
+ *
+ * Both drain their generator rather than duplicating it, so a sliced build and an eager
+ * one cannot place different boxes.
+ */
+export function generateMailboxes(
+  roads: WorldRoad[],
+  avoid: readonly { x: number; z: number }[] = [],
+  buildings: WorldBuilding[] = [],
+): MailboxPlacement[] {
+  const job = generateMailboxesJob(roads, avoid, buildings);
+  let step = job.next();
+  while (!step.done) step = job.next();
+  return step.value;
+}
+
+export function mappedMailboxes(points: readonly LocalPoint[], roads: WorldRoad[]): MailboxPlacement[] {
+  const job = mappedMailboxesJob(points, roads);
+  let step = job.next();
+  while (!step.done) step = job.next();
+  return step.value;
 }

@@ -87,3 +87,80 @@ describe('generateBusStops', () => {
     expect(generateBusStops([{ id: 'b', kind: 'primary', width: 8, points: [] }])).toHaveLength(0);
   });
 });
+
+
+/**
+ * The shape of the walk, frozen: these coordinates were recorded from the eager
+ * implementation before it was cut into slices, so the incremental form has something to
+ * be compared against that is not simply another run of itself.
+ *
+ * The network is deliberately awkward — a 4km primary crossed every 400m (candidates
+ * that land back on pavement), a road carrying a zero-length segment, a kind buses never
+ * serve, and a building sitting on the kerb — so a mistake in where the walk pauses
+ * shows up as a missing or moved shelter rather than as an equal-length list.
+ */
+const FROZEN_STOPS: [number, number, number][] = [
+  [160, 9.2, 3.141593],
+  [480, -9.2, 0],
+  [1120, -9.2, 0],
+  [1440, 9.2, 3.141593],
+  [1760, -9.2, 0],
+  [2080, 9.2, 3.141593],
+  [2720, 9.2, 3.141593],
+  [3040, -9.2, 0],
+  [3360, 9.2, 3.141593],
+  [3680, -9.2, 0],
+  [4000, 9.2, 3.141593],
+  [-9.2, -140, 1.570796],
+  [9.2, 180, -1.570796],
+  [390.8, -140, 1.570796],
+  [409.2, 180, -1.570796],
+  [790.8, -140, 1.570796],
+  [809.2, 180, -1.570796],
+  [1190.8, -140, 1.570796],
+  [1209.2, 180, -1.570796],
+  [1590.8, -140, 1.570796],
+  [1609.2, 180, -1.570796],
+  [1990.8, -140, 1.570796],
+  [2009.2, 180, -1.570796],
+  [2390.8, -140, 1.570796],
+  [2409.2, 180, -1.570796],
+  [2790.8, -140, 1.570796],
+  [2809.2, 180, -1.570796],
+  [3190.8, -140, 1.570796],
+  [3209.2, 180, -1.570796],
+  [3590.8, -140, 1.570796],
+  [3609.2, 180, -1.570796],
+  [160, 907.7, 3.141593],
+  [480, 892.3, 0],
+  [800, 907.7, 3.141593],
+  [1120, 892.3, 0],
+];
+
+describe('generateBusStops on a crossing network', () => {
+  const network: WorldRoad[] = [
+    { id: 'long', kind: 'primary', width: 12, points: [{ x: 0, z: 0 }, { x: 4000, z: 0 }] },
+    ...Array.from({ length: 10 }, (_, index) => ({
+      id: `cross-${index}`,
+      kind: 'primary',
+      width: 12,
+      points: [{ x: index * 400, z: -300 }, { x: index * 400, z: 300 }],
+    })),
+    { id: 'degenerate', kind: 'secondary', width: 9, points: [{ x: 0, z: 900 }, { x: 0, z: 900 }, { x: 1200, z: 900 }] },
+    { id: 'skipped', kind: 'motorway', width: 20, points: [{ x: 0, z: 1800 }, { x: 3000, z: 1800 }] },
+  ];
+  const blocks: WorldBuilding[] = [{
+    id: 'block',
+    height: 12,
+    properties: {},
+    rings: [[{ x: 1100, z: 4 }, { x: 1300, z: 4 }, { x: 1300, z: 40 }, { x: 1100, z: 40 }, { x: 1100, z: 4 }]],
+  }];
+
+  it('reproduces the recorded placements exactly', () => {
+    const stops = generateBusStops(network, blocks);
+
+    expect(stops.map((stop) => [
+      Number(stop.x.toFixed(6)), Number(stop.z.toFixed(6)), Number(stop.yaw.toFixed(6)),
+    ])).toEqual(FROZEN_STOPS);
+  });
+});

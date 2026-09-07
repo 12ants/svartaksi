@@ -70,8 +70,8 @@ with the same parameters as their existing eager counterparts and return types
 `Generator<void, BusStopPlacement[], void>` / `Generator<void, MailboxPlacement[], void>`.
 The eager APIs drain the generator and remain backward compatible.
 
-- [ ] Add regression fixtures before conversion: intersecting roads, duplicate mapped boxes, obstacles, skipped road kinds, zero-length segments, and one very long road. Freeze expected coordinates/order from existing behavior, not merely equality between two new wrappers.
-- [ ] Add incremental/eager parity and multi-yield assertions. Reuse `road` and `drain` helpers in `incrementalPlacement.test.ts`:
+- [x] Add regression fixtures before conversion: intersecting roads, duplicate mapped boxes, obstacles, skipped road kinds, zero-length segments, and one very long road. Freeze expected coordinates/order from existing behavior, not merely equality between two new wrappers.
+- [x] Add incremental/eager parity and multi-yield assertions. Reuse `road` and `drain` helpers in `incrementalPlacement.test.ts`:
 
 ```ts
 const roads = Array.from({ length: 900 }, (_, i) => road(`stop-${i}`, 0, i * 30, 'primary'));
@@ -80,7 +80,7 @@ expect(result.value).toEqual(generateBusStops(roads, []));
 expect(result.yields).toBeGreaterThan(1);
 ```
 
-- [ ] Run the placement suites to observe failures for missing jobs. Convert existing bodies to generators; maintain loop-local spacing, side, nearest-road winner, hash, and accumulated placement state across yields. Start with a named 256-operation cadence consistent with existing jobs, then measure.
+- [x] Run the placement suites to observe failures for missing jobs. Convert existing bodies to generators; maintain loop-local spacing, side, nearest-road winner, hash, and accumulated placement state across yields. Start with a named 256-operation cadence consistent with existing jobs, then measure.
 
 ```ts
 let operations = 0;
@@ -88,12 +88,18 @@ let operations = 0;
 if (++operations % 256 === 0) yield;
 ```
 
-- [ ] Yield in road-length scans, mapped-box road/segment scans, and candidate loops, not just after each road. A single clearance query may still scan many roads/buildings; document that remaining atomic cost and profile it before changing clearance semantics.
-- [ ] Replace synchronous calls in `buildSurfacesInto` with `yield*`; preserve mapped-first mailbox order, avoid lists, and the existing `.slice(0, MAX_...)` positions. Do not stop generation early merely because the cap is reached without proving identical behavior.
-- [ ] Keep cancellation free of scene mutations until the existing staging publication. Add cancel/restart assertions that old placements never publish after a replacement build.
-- [ ] Run `pnpm test -- tests/world/incrementalPlacement.test.ts tests/world/busStops.test.ts tests/world/mailboxes.test.ts tests/world/buildScheduler.test.ts tests/world/streamRestream.test.ts tests/world/threeWorld.test.ts`.
-- [ ] Repeat the matched stream-boundary captures. Compare scheduler histograms and frame p95/p99, while checking total completion time and replacement count. Shorter slices alone do not establish faster total builds.
-- [ ] Run `pnpm test:all` and `pnpm build`; commit as `perf: slice remaining roadside placement work` if correctness holds and evidence supports the tradeoff.
+- [x] Yield in road-length scans, mapped-box road/segment scans, and candidate loops, not just after each road. A single clearance query may still scan many roads/buildings; document that remaining atomic cost and profile it before changing clearance semantics.
+- [x] Replace synchronous calls in `buildSurfacesInto` with `yield*`; preserve mapped-first mailbox order, avoid lists, and the existing `.slice(0, MAX_...)` positions. Do not stop generation early merely because the cap is reached without proving identical behavior.
+- [x] Keep cancellation free of scene mutations until the existing staging publication. Add cancel/restart assertions that old placements never publish after a replacement build.
+- [x] Run `pnpm test -- tests/world/incrementalPlacement.test.ts tests/world/busStops.test.ts tests/world/mailboxes.test.ts tests/world/buildScheduler.test.ts tests/world/streamRestream.test.ts tests/world/threeWorld.test.ts`.
+- [ ] **UNVERIFIED — no target browser.** Repeat the matched stream-boundary captures. Compare scheduler histograms and frame p95/p99, while checking total completion time and replacement count. Shorter slices alone do not establish faster total builds.
+- [x] Run `pnpm test:all` and `pnpm build`; commit as `perf: slice remaining roadside placement work` if correctness holds and evidence supports the tradeoff.
+
+**Status 2026-09-07: structurally complete, timing UNVERIFIED.** The frozen fixtures show
+the incremental walks reproduce the eager output exactly, and the yield assertions show
+they really do pause — including inside a single long road, which a per-road cadence
+would not have. No hardware capture exists, so no frame-time claim is made: this is
+correctness and slice-shape work, not a measured speedup.
 
 ## Task 3: Remove capture buffer shifting
 

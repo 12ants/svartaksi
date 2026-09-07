@@ -1,17 +1,22 @@
 /**
- * The four placement stages that used to run whole between two of the world builder's
- * yields — the reason build slices overran the frame budget by up to eleven times.
+ * The placement stages that used to run whole between two of the world builder's yields
+ * — the reason build slices overran the frame budget by up to eleven times. Lamps, trees,
+ * signals and neon signs were cut up first; the shelter and post-box walks followed.
  *
  * Each now has an incremental `*Job` form that the builder drives with `yield*`, and an
  * eager form that drains it. These tests hold the two properties the change rests on:
  * pausing the walk does not change what it produces, and the walk really does pause.
  */
 import { describe, expect, it } from 'vitest';
+import { generateBusStops, generateBusStopsJob } from '@/world/busStops';
+import {
+  generateMailboxes, generateMailboxesJob, mappedMailboxes, mappedMailboxesJob,
+} from '@/world/mailboxes';
 import { generateStreetLights, generateStreetLightsJob } from '@/world/streetLights';
 import { generateTrees, generateTreesJob } from '@/world/vegetation';
 import { findTrafficSignals, findTrafficSignalsJob } from '@/svartaksi/trafficLights';
 import { generateNeonSigns, generateNeonSignsJob } from '@/svartaksi/neonSigns';
-import type { WorldArea, WorldBuilding, WorldObject, WorldRoad } from '@/world/types';
+import type { LocalPoint, WorldArea, WorldBuilding, WorldObject, WorldRoad } from '@/world/types';
 
 /** A straight road of `length` metres, offset onto its own line so a grid of them meets. */
 function road(id: string, x: number, z: number, kind = 'residential', width = 7): WorldRoad {
@@ -147,5 +152,74 @@ describe('neon signs', () => {
     const positions = value.map((sign) => `${sign.x.toFixed(3)}:${sign.z.toFixed(3)}`);
 
     expect(new Set(positions).size).toBe(positions.length);
+  });
+});
+
+describe('bus shelters', () => {
+  const roads = Array.from({ length: 900 }, (_, index) => road(`stop-${index}`, 0, index * 30, 'primary', 12));
+  const buildings = Array.from({ length: 40 }, (_, index) => square(`b${index}`, index * 40, 12, 20));
+
+  it('places exactly the same shelters whether or not it pauses', () => {
+    const { value, yields } = drain(generateBusStopsJob(roads, buildings));
+
+    expect(value).toEqual(generateBusStops(roads, buildings));
+    expect(value.length).toBeGreaterThan(0);
+    expect(yields).toBeGreaterThan(1);
+  });
+
+  it('pauses inside one long road too, not only between roads', () => {
+    // A single road, so a per-road cadence would never hand the frame back at all —
+    // which is the case that made the shelter pass overrun the budget in the first place.
+    const long: WorldRoad = {
+      id: 'long',
+      kind: 'primary',
+      width: 12,
+      points: Array.from({ length: 3_000 }, (_, index) => ({ x: index * 40, z: 0 })),
+    } as WorldRoad;
+
+    const { value, yields } = drain(generateBusStopsJob([long]));
+
+    expect(value).toEqual(generateBusStops([long]));
+    expect(yields).toBeGreaterThan(1);
+  });
+
+  it('keeps the emitted order, since the caller keeps only the first N it can afford', () => {
+    const { value } = drain(generateBusStopsJob(roads, buildings));
+
+    expect(value.slice(0, 20)).toEqual(generateBusStops(roads, buildings).slice(0, 20));
+  });
+});
+
+describe('post boxes', () => {
+  const roads = Array.from({ length: 900 }, (_, index) => road(`box-${index}`, 0, index * 30));
+  const buildings = Array.from({ length: 40 }, (_, index) => square(`b${index}`, index * 40, 12, 20));
+  const shelters = Array.from({ length: 30 }, (_, index) => ({ x: index * 200, z: 6 }));
+
+  it('places exactly the same boxes whether or not it pauses', () => {
+    const { value, yields } = drain(generateMailboxesJob(roads, shelters, buildings));
+
+    expect(value).toEqual(generateMailboxes(roads, shelters, buildings));
+    expect(value.length).toBeGreaterThan(0);
+    expect(yields).toBeGreaterThan(1);
+  });
+
+  it('keeps boxes apart across a pause, since the separation check reads what it has placed', () => {
+    const { value } = drain(generateMailboxesJob(roads, shelters, buildings));
+
+    for (const [index, box] of value.entries()) {
+      for (const other of value.slice(index + 1)) {
+        expect(Math.hypot(other.x - box.x, other.z - box.z)).toBeGreaterThan(1);
+      }
+    }
+  });
+
+  it('orients surveyed boxes identically whether or not it pauses', () => {
+    const points: LocalPoint[] = Array.from({ length: 200 }, (_, index) => ({ x: index * 17, z: index * 3 }));
+
+    const { value, yields } = drain(mappedMailboxesJob(points, roads));
+
+    expect(value).toEqual(mappedMailboxes(points, roads));
+    expect(value).toHaveLength(points.length);
+    expect(yields).toBeGreaterThan(1);
   });
 });

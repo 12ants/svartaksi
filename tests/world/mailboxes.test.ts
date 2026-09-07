@@ -150,3 +150,93 @@ describe('mappedMailboxes', () => {
     expect(boxes).toEqual([{ x: 5, z: 5, yaw: 0 }]);
   });
 });
+
+
+/**
+ * The same frozen-fixture idea as the shelters': coordinates recorded from the eager
+ * implementation before it was cut into slices, on a network built to make the walk's
+ * order matter — spurs meeting a long residential road (so the separation check has
+ * neighbours to reject against), a road too short to serve, a zero-length segment, a
+ * footway that is skipped, and one shelter in `avoid` standing exactly where a box
+ * would otherwise go.
+ */
+const FROZEN_BOXES: [number, number, number][] = [
+  [156.666667, -5.9, 3.141593],
+  [626.666667, -5.9, 3.141593],
+  [1096.666667, -5.9, 3.141593],
+  [2036.666667, -5.9, 3.141593],
+  [2506.666667, -5.9, 3.141593],
+  [2976.666667, -5.9, 3.141593],
+  [3446.666667, -5.9, 3.141593],
+  [3916.666667, -5.9, 3.141593],
+  [4.4, 156.666667, 1.570796],
+  [495.6, 156.666667, -1.570796],
+  [1004.4, 156.666667, 1.570796],
+  [1495.6, 156.666667, -1.570796],
+  [2004.4, 156.666667, 1.570796],
+  [2495.6, 156.666667, -1.570796],
+  [3004.4, 156.666667, 1.570796],
+  [3495.6, 156.666667, -1.570796],
+  [156.666667, 1204.9, 0],
+  [626.666667, 1204.9, 0],
+  [1096.666667, 1204.9, 0],
+];
+
+/** Two surveyed nodes at the same spot (both kept — a duplicate node is the surveyor's
+ * business, not the generator's), one beside the main road, one nowhere near anything. */
+const FROZEN_MAPPED: [number, number, number][] = [
+  [100, 12, 0],
+  [100, 12, 0],
+  [2500, -20, 3.141593],
+  [9000, 9000, 0.694738],
+];
+
+describe('mailbox placement on a spur network', () => {
+  const network: WorldRoad[] = [
+    { id: 'main', kind: 'residential', width: 8, points: [{ x: 0, z: 0 }, { x: 4000, z: 0 }] },
+    ...Array.from({ length: 8 }, (_, index) => ({
+      id: `spur-${index}`,
+      kind: 'service',
+      width: 5,
+      points: [{ x: index * 500, z: 0 }, { x: index * 500, z: 400 }],
+    })),
+    { id: 'stub', kind: 'residential', width: 6, points: [{ x: 0, z: 900 }, { x: 100, z: 900 }] },
+    { id: 'degenerate', kind: 'unclassified', width: 6, points: [{ x: 0, z: 1200 }, { x: 0, z: 1200 }, { x: 1500, z: 1200 }] },
+    { id: 'skipped', kind: 'footway', width: 3, points: [{ x: 0, z: 1800 }, { x: 3000, z: 1800 }] },
+  ];
+  const blocks: WorldBuilding[] = [{
+    id: 'block',
+    height: 12,
+    properties: {},
+    rings: [[{ x: 1100, z: 4 }, { x: 1300, z: 4 }, { x: 1300, z: 40 }, { x: 1100, z: 40 }, { x: 1100, z: 4 }]],
+  }];
+  /** A shelter standing on the box the walk would otherwise place at x=1566.67. */
+  const shelter = [{ x: 1566.667, z: -5.9 }];
+
+  it('reproduces the recorded generated placements exactly', () => {
+    const boxes = generateMailboxes(network, shelter, blocks);
+
+    expect(boxes.map((box) => [
+      Number(box.x.toFixed(6)), Number(box.z.toFixed(6)), Number(box.yaw.toFixed(6)),
+    ])).toEqual(FROZEN_BOXES);
+  });
+
+  it('gives way to a shelter already standing there rather than shifting the round', () => {
+    const suppressed = FROZEN_BOXES[0][0] + MAILBOX_SPACING * 3;
+    const near = (xs: number[]) => xs.some((x) => Math.abs(x - suppressed) < 1e-3);
+
+    expect(near(generateMailboxes(network, [], blocks).map((box) => box.x))).toBe(true);
+    expect(near(FROZEN_BOXES.map(([x]) => x))).toBe(false);
+  });
+
+  it('reproduces the recorded surveyed placements exactly', () => {
+    const mapped = mappedMailboxes(
+      [{ x: 100, z: 12 }, { x: 100, z: 12 }, { x: 2500, z: -20 }, { x: 9000, z: 9000 }],
+      network,
+    );
+
+    expect(mapped.map((box) => [
+      Number(box.x.toFixed(6)), Number(box.z.toFixed(6)), Number(box.yaw.toFixed(6)),
+    ])).toEqual(FROZEN_MAPPED);
+  });
+});

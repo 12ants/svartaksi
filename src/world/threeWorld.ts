@@ -29,8 +29,8 @@ import { generateStreetLightsJob, type LampPlacement } from './streetLights';
 import { roadRibbonFrames, roadEndpointExtension, extendRoadEndpoints } from './roadRibbon';
 import { bridgeDeckColliders, bridgeRailingColliders, type BridgeCollider } from './bridgeColliders';
 import { buildRoadRailingGeometry, createRailingMaterial } from './bridgeRailings';
-import { generateBusStops, type BusStopPlacement } from './busStops';
-import { generateMailboxes, mappedMailboxes, type MailboxPlacement } from './mailboxes';
+import { generateBusStopsJob, type BusStopPlacement } from './busStops';
+import { generateMailboxesJob, mappedMailboxesJob, type MailboxPlacement } from './mailboxes';
 import { createTrafficLights, findTrafficSignalsJob, type TrafficLightBatch } from '../svartaksi/trafficLights';
 import { createNeonSigns, generateNeonSignsJob, type NeonSignBatch } from '../svartaksi/neonSigns';
 import { generateTreesJob, mappedTrees, type TreePlacement } from './vegetation';
@@ -2362,10 +2362,10 @@ export function createThreeWorld(scene: THREE.Scene): ThreeWorld {
       // tube is baked into a material colour, so turning them off buys back geometry,
       // not lights. Clipped to the building draw distance because an InstancedMesh is
       // culled as one unit and a 2km batch redraws every shelter into the shadow map.
-      const stops = generateBusStops(
+      const stops = (yield* generateBusStopsJob(
         visibleRoads.filter((road) => anyPointWithinDrawDistance(road.points, anchorX, anchorZ, effective.buildingDistance)),
         data.buildings,
-      ).slice(0, MAX_BUS_STOPS);
+      )).slice(0, MAX_BUS_STOPS);
       if (stops.length) {
         const grounded = standOnGround(stops, (x, z) => terrainHeightAtXZIndexed(x, z, terrainIndex()));
         // The post boxes keep out of the shelters by position alone, so they read the
@@ -2397,7 +2397,7 @@ export function createThreeWorld(scene: THREE.Scene): ThreeWorld {
         anyPointWithinDrawDistance(road.points, anchorX, anchorZ, effective.buildingDistance));
       // Surveyed boxes first, and they also join the avoid list — a mapped box is a real
       // one, so a generated box has to give way to it rather than stand beside it.
-      const mapped = mappedMailboxes(
+      const mapped = yield* mappedMailboxesJob(
         data.objects
           .filter((object) => object.kind === 'post_box'
             && withinDrawDistance(object.point, anchorX, anchorZ, effective.buildingDistance))
@@ -2405,7 +2405,7 @@ export function createThreeWorld(scene: THREE.Scene): ThreeWorld {
         boxRoads,
       );
       const mailboxes = mapped
-        .concat(generateMailboxes(boxRoads, [...placedStops, ...mapped], data.buildings))
+        .concat(yield* generateMailboxesJob(boxRoads, [...placedStops, ...mapped], data.buildings))
         .slice(0, MAX_MAILBOXES);
       if (mailboxes.length) {
         const grounded = standOnGround(mailboxes, (x, z) => terrainHeightAtXZIndexed(x, z, terrainIndex()));
