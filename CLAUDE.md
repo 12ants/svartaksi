@@ -131,3 +131,7 @@ See `docs/COLLABORATIVE-DESIGN-PRINCIPLE.md` for the full protocol.
 ## Context Management
 
 @.claude/docs/context-management.md
+
+## Engine Version Reference
+
+@docs/engine-reference/threejs/VERSION.md

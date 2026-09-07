@@ -32,5 +32,12 @@ This project has no vendored engine snapshot. The engine is three.js, pinned in
 own types and examples rather than a copied-out reference, and check `pnpm why three`
 before assuming an API exists.
 
+What `docs/engine-reference/threejs/` does hold is a version-gap record, not a copy of
+the engine: which APIs moved between the model's training data and the pinned release.
+`VERSION.md` (imported by the root `CLAUDE.md`) pins the versions and states the risk;
+`breaking-changes.md`, `deprecated-apis.md` and `current-best-practices.md` carry the
+detail. Consult them before trusting recall of a three.js or R3F API, then still verify
+against the installed `.d.ts`. Run `/setup-engine refresh` when the pins move.
+
 `@types/three` is pinned to the same minor as `three`; a mismatch between the two is the
 usual cause of an API that "does not exist" but does.

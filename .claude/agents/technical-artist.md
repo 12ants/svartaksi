@@ -106,3 +106,23 @@ Document and enforce per-category budgets:
 code standards
 ### Coordinates with: `engine-programmer` for rendering systems,
 `performance-analyst` for optimization targets
+
+## Version Awareness
+
+This project pins three.js `0.185.1` (r185) and `@react-three/fiber` `9.7.0` — both well
+beyond the model's training data, which knows roughly three.js r160 and R3F v8. API
+recall is therefore unreliable by default. Before suggesting or writing code:
+
+1. Read `docs/engine-reference/threejs/VERSION.md` for the pins and current risk level.
+2. Check `docs/engine-reference/threejs/deprecated-apis.md` before using any three.js or
+   R3F API you are recalling rather than reading — it is a "don't use X → use Y" table.
+3. Check `docs/engine-reference/threejs/breaking-changes.md` when touching materials,
+   shaders, tone mapping, colour management or environment maps. The PBR lighting math
+   changed twice between r180 and r181, so visual output can drift without any code
+   change — treat an unexplained look shift as a version question first.
+4. When still uncertain, read the installed types under `node_modules/three/` and
+   `node_modules/@react-three/fiber/` — the installed package is the source of truth,
+   not memory. Use WebSearch only if the types leave the question open.
+
+A "this API doesn't exist" error is usually a `three` / `@types/three` version mismatch,
+not a missing API. `/setup-engine refresh` re-verifies these docs when the pins move.
