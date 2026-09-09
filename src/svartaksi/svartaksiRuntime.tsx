@@ -203,6 +203,7 @@ import {
 import { loadDogTrustFromStorage, saveDogTrustToStorage } from './dogTrust';
 import { installDogDebugBridge, type SvartaksiDogSnapshot } from './dogDebugBridge';
 import { installBusRiderDebugBridge, type SvartaksiBusRiderSnapshot } from './busRiderDebugBridge';
+import { installCameraDebugBridge, type SvartaksiCameraSnapshot } from './cameraDebugBridge';
 import { isDevModeRequested } from './devMode';
 import { pushLog } from './gameLogger';
 import {
@@ -1319,6 +1320,33 @@ function WorldScene({
       board: () => debugBoardBusRef.current(),
     });
 
+    const disposeCameraDebugBridge = installCameraDebugBridge({
+      read: (): SvartaksiCameraSnapshot | null => ({
+        mode: controlRef.current.cameraMode,
+        position: {
+          x: freecamPositionRef.current.x,
+          y: freecamPositionRef.current.y,
+          z: freecamPositionRef.current.z,
+        },
+        yaw: freecamYawRef.current,
+        pitch: freecamPitchRef.current,
+        canRelocate: canRelocateWorld(busLifecycleRef.current),
+      }),
+      setMode: (mode) => setCameraRef.current(mode),
+      place: ({ x, y, z, yaw, pitch }) => {
+        if (controlRef.current.cameraMode !== 'freecam') return false;
+        freecamPositionRef.current.set(x, y, z);
+        freecamYawRef.current = yaw;
+        freecamPitchRef.current = THREE.MathUtils.clamp(pitch, -FREECAM.maxPitch, FREECAM.maxPitch);
+        // Entering freecam arms a one-shot seed that copies the live camera over these
+        // refs on the next frame (see the freecam block in useFrame). Leaving it armed
+        // would overwrite this placement before it was ever drawn, which is the whole
+        // failure this bridge exists to avoid.
+        freecamSeedPendingRef.current = false;
+        return true;
+      },
+    });
+
     const flushDogTrust = () => saveDogTrustToStorage(window.localStorage, dogStateRef.current);
     window.addEventListener('pagehide', flushDogTrust);
 
@@ -2363,6 +2391,7 @@ function WorldScene({
       campRef.current = null;
       disposeDogDebugBridge?.();
       disposeBusRiderDebugBridge?.();
+      disposeCameraDebugBridge?.();
       window.removeEventListener('pagehide', flushDogTrust);
       flushDogTrust();
       dog.group.traverse((child) => {
