@@ -1727,6 +1727,52 @@ describe('Three.js world geometry', () => {
       }
     });
 
+    it('walls the cutting a tunnel approach ramp is dug into', () => {
+      // A tunnel bore is never painted, but the approach carrying the street down to it
+      // is an ordinary visible road that the profile digs. The ground is a solid plane at
+      // grade, so before this the ribbon simply vanished into it and the car sank with it.
+      const scene = new THREE.Scene();
+      const world = createThreeWorld(scene);
+      world.replace({
+        ...worldData('maplibre'),
+        roads: [
+          { id: 'bore', kind: 'primary', width: 10, structure: 'tunnel', points: [{ x: -30, z: 0 }, { x: 30, z: 0 }] },
+          { id: 'approach', kind: 'primary', width: 10, points: [{ x: 30, z: 0 }, { x: 120, z: 0 }] },
+          { id: 'over', kind: 'residential', width: 8, points: [{ x: 0, z: -50 }, { x: 0, z: 50 }] },
+        ],
+      });
+
+      const roads = scene.getObjectByName('world:roads')?.children ?? [];
+      const trench = roads.find((child) => child.name === 'world:tunnel-trenches') as THREE.Mesh | undefined;
+      expect(trench).toBeInstanceOf(THREE.Mesh);
+      expect(trench!.castShadow).toBe(true);
+
+      // The approach is dug several metres down at the portal and climbs back to grade,
+      // so the walls span that range: down to the road surface, up past grade.
+      const position = trench!.geometry.getAttribute('position');
+      let minY = Infinity;
+      let maxY = -Infinity;
+      for (let index = 0; index < position.count; index += 1) {
+        minY = Math.min(minY, position.getY(index));
+        maxY = Math.max(maxY, position.getY(index));
+      }
+      expect(minY).toBeLessThan(-2);
+      expect(maxY).toBeGreaterThan(0);
+    });
+
+    it('builds no cutting for a road that never leaves grade', () => {
+      const scene = new THREE.Scene();
+      const world = createThreeWorld(scene);
+      world.replace({
+        ...worldData('maplibre'),
+        roads: [
+          { id: 'flat', kind: 'residential', width: 8, points: [{ x: -40, z: 0 }, { x: 40, z: 0 }] },
+        ],
+      });
+      const roads = scene.getObjectByName('world:roads')?.children ?? [];
+      expect(roads.some((child) => child.name === 'world:tunnel-trenches')).toBe(false);
+    });
+
     it('reveals hidden roads only through the explicit debug override, not by default', () => {
       const scene = new THREE.Scene();
       const world = createThreeWorld(scene);

@@ -31,6 +31,7 @@ import { roadRibbonFrames, roadEndpointExtension, extendRoadEndpoints } from './
 import { bridgeDeckColliders, bridgeRailingColliders, type BridgeCollider } from './bridgeColliders';
 import { buildRoadRailingGeometry, createRailingMaterial } from './bridgeRailings';
 import { buildBridgePierGeometry, createPierMaterial, createRoadObstructionTest, pierPlacements } from './bridgePiers';
+import { buildTunnelTrenchGeometry, createTrenchMaterial } from './tunnelTrench';
 import { generateBusStopsJob, type BusStopPlacement } from './busStops';
 import { generateMailboxesJob, mappedMailboxesJob, type MailboxPlacement } from './mailboxes';
 import { createTrafficLights, findTrafficSignalsJob, type TrafficLightBatch } from '../svartaksi/trafficLights';
@@ -2199,6 +2200,9 @@ export function createThreeWorld(scene: THREE.Scene): ThreeWorld {
       /** Columns and abutments under whatever decks this build contains, merged into one
        * mesh alongside the parapets and for the same reason. Usually empty. */
       const piers: THREE.BufferGeometry[] = [];
+      /** Retaining walls and portal faces for whatever the profile digs below grade —
+       * merged like the piers and the parapets. Usually empty. */
+      const trenches: THREE.BufferGeometry[] = [];
       // Sliced by accumulated polyline points rather than by road count: buildRoadGeometry
       // emits vertices per point, so eight 2-point stubs and eight 300-point ring roads
       // are wildly different amounts of work that a fixed road-count cadence charges the
@@ -2226,8 +2230,15 @@ export function createThreeWorld(scene: THREE.Scene): ThreeWorld {
         // near the light's frustum. A railing is also fine detail nobody resolves at the
         // full terrain radius.
         const nearEnoughForDetail = anyPointWithinDrawDistance(road.points, anchorX, anchorZ, effective.buildingDistance);
-        if (elevated || road.structure === 'bridge') {
-          const samples = roadDeckSamples(road, terrainClearance, profile, terrainIndex());
+        // Sampled once and shared by the deck branch and the cutting branch below. A road
+        // that is neither raised nor profiled has no structure either way and never pays
+        // for it; one that is both (a ramp diving from a deck into a cutting) walks the
+        // polyline once rather than twice.
+        const structureSamples = (elevated || road.structure === 'bridge' || profile)
+          ? roadDeckSamples(road, terrainClearance, profile, terrainIndex())
+          : null;
+        if (structureSamples && (elevated || road.structure === 'bridge')) {
+          const samples = structureSamples;
           const railing = buildRoadRailingGeometry(road, samples.points, samples.elevations, samples.lifts, roadElevationProfiles);
           const thickness = deckThicknessProfile(road, samples.lifts);
           if (thickness) staging.bridgeColliders.push(...bridgeDeckColliders(
@@ -2258,6 +2269,17 @@ export function createThreeWorld(scene: THREE.Scene): ThreeWorld {
             if (pier) piers.push(pier);
           }
           yield;
+        }
+        // The mirror of the deck branch above: where a road is dug below its own at-grade
+        // baseline, the solid ground plane swallows the ribbon and the car sinks with it.
+        // Retaining walls carry the cut up to grade, and a portal caps the mouth where a
+        // visible approach hands over to the tunnel nothing paints. Same detail radius as
+        // the parapets and supports, for the same shadow-map reason.
+        if (nearEnoughForDetail && structureSamples) {
+          const trench = buildTunnelTrenchGeometry(
+            structureSamples.points, structureSamples.elevations, structureSamples.lifts, road.width,
+          );
+          if (trench) trenches.push(trench);
         }
         const key = elevated ? `${styleKey}:deck` : styleKey;
         const bucket = byBucket.get(key);
@@ -2309,6 +2331,19 @@ export function createThreeWorld(scene: THREE.Scene): ThreeWorld {
         mesh.renderOrder = ROAD_STYLE_RENDER_ORDER[styleKey] + (elevated ? ELEVATED_ROAD_RENDER_ORDER_OFFSET : 0);
         mesh.userData[INSPECTION_USER_DATA_KEY] = records;
         roads.add(mesh);
+      }
+
+      if (trenches.length) {
+        yield;
+        const merged = mergeGeometries(trenches, false);
+        for (const geometry of trenches) geometry.dispose();
+        if (merged) {
+          const trenchMesh = new THREE.Mesh(merged, createTrenchMaterial());
+          trenchMesh.name = 'world:tunnel-trenches';
+          trenchMesh.castShadow = true;
+          trenchMesh.receiveShadow = true;
+          roads.add(trenchMesh);
+        }
       }
 
       if (piers.length) {
