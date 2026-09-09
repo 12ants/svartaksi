@@ -25,6 +25,7 @@ import {
 import { getOrCreateRoadMaterial, getRoadStyleKey, type RoadStyleKey } from '../svartaksi/roadStyle';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { isSurfaceVisible } from './surfaceVisibility';
+import { createRoadSliceBudget, roadPaintDistance, ROAD_GEOMETRY_POINT_BUDGET } from './roadDrawPolicy';
 import { generateStreetLightsJob, type LampPlacement } from './streetLights';
 import { roadRibbonFrames, roadEndpointExtension, extendRoadEndpoints } from './roadRibbon';
 import { bridgeDeckColliders, bridgeRailingColliders, type BridgeCollider } from './bridgeColliders';
@@ -1465,7 +1466,6 @@ export interface ThreeWorld {
  * on how long a single slice can run on a slow one. `estimateBuildSteps` reads these same
  * constants, so the progress readout follows automatically.
  */
-const ROAD_CHUNK = 8;
 const AREA_CHUNK = 8;
 const FACADE_RECORD_CHUNK = 8;
 const BUILDING_MESH_CHUNK = 16;
@@ -1498,7 +1498,9 @@ const MAX_MAILBOXES = 64;
 
 /**
  * Slices one full rebuild of `data` is expected to take, for the progress readout.
- * Mirrors the chunk sizes the two build jobs actually yield at. The stages that used to
+ * Mirrors the chunk sizes the two build jobs actually yield at — including the road
+ * phase, which slices by accumulated polyline points rather than by road count, so the
+ * estimate counts points there too. The stages that used to
  * run whole between two yields — trees, lamps, traffic signals, neon signs — now yield
  * inside themselves (see their `*Job` forms), so their slices are bounded like everything
  * else; the remaining single-yield stages (street furniture, the post boxes, the facade
@@ -1506,12 +1508,20 @@ const MAX_MAILBOXES = 64;
  * subset each stage walks — that subset isn't known until the job runs, and an
  * over-estimate is the harmless direction to be wrong in.
  */
+/** Total polyline points across a road set — the unit the road phase now slices by,
+ * so the progress estimate counts the same work the loop actually charges itself. */
+function roadPointCount(roads: readonly WorldRoad[]): number {
+  let points = 0;
+  for (const road of roads) points += road.points.length;
+  return points;
+}
+
 function estimateBuildSteps(data: WorldData): number {
   const buildings = Math.min(data.buildings.length, MAX_VISIBLE_BUILDINGS);
   return 8
     + Math.ceil(data.parks.length / AREA_CHUNK)
     + Math.ceil(data.water.length / AREA_CHUNK)
-    + Math.ceil(data.roads.length / ROAD_CHUNK)
+    + Math.ceil(roadPointCount(data.roads) / ROAD_GEOMETRY_POINT_BUDGET)
     + Math.ceil(buildings / FACADE_RECORD_CHUNK)
     + Math.ceil(buildings / BUILDING_MESH_CHUNK);
 }
@@ -1987,7 +1997,25 @@ export function createThreeWorld(scene: THREE.Scene): ThreeWorld {
       : nearbyRoads.filter((road) => isSurfaceVisible(road));
     staging.builtCounts.parks = options.parks ? nearbyParks.length : 0;
     staging.builtCounts.water = options.water ? nearbyWater.length : 0;
-    staging.builtCounts.roads = options.roads ? visibleRoads.length : 0;
+    // What the carriageway loop below actually paints, as distinct from `visibleRoads`,
+    // which stays the input to every *placement* stage (lamps, signals, bus stops, post
+    // boxes). Minor classes — footpaths, alleys, service roads — are cut to a shorter,
+    // fog-derived radius by roadDrawPolicy: they are the most numerous roads in OSM urban
+    // data and the least visible at distance, so building them out to the full terrain
+    // radius is geometry nobody can see through the fog. Major roads are untouched, since
+    // an arterial running to the horizon is the reason roads are distance-culled rather
+    // than frustum-culled at all.
+    //
+    // Splitting the two sets rather than narrowing `visibleRoads` is what keeps this
+    // change confined to rendering: the paint radius is guaranteed wider than every
+    // tier's building distance (asserted in roadDrawPolicy's tests), so every road a prop
+    // is placed against is still painted, and routing/physics read `nearbyRoads` anyway.
+    const paintedRoads = options.debugShowHiddenRoads
+      ? visibleRoads
+      : visibleRoads.filter((road) => anyPointWithinDrawDistance(
+          road.points, anchorX, anchorZ, roadPaintDistance(road.kind, MAX_TERRAIN_DRAW_DISTANCE),
+        ));
+    staging.builtCounts.roads = options.roads ? paintedRoads.length : 0;
     staging.builtCounts.objects = options.streetFurniture ? data.objects.length : 0;
 
     // Roads clear it and trees stand on it, and both blocks are in this one build — so
@@ -2167,9 +2195,14 @@ export function createThreeWorld(scene: THREE.Scene): ThreeWorld {
        * mesh at the end, like the carriageways themselves, rather than one draw call per
        * bridge. Usually empty: a snapshot with no grade separation in it has no railings. */
       const railings: THREE.BufferGeometry[] = [];
-      for (let index = 0; index < visibleRoads.length; index += 1) {
-        const road = visibleRoads[index];
-        if (index % ROAD_CHUNK === ROAD_CHUNK - 1) yield;
+      // Sliced by accumulated polyline points rather than by road count: buildRoadGeometry
+      // emits vertices per point, so eight 2-point stubs and eight 300-point ring roads
+      // are wildly different amounts of work that a fixed road-count cadence charges the
+      // same. See ROAD_GEOMETRY_POINT_BUDGET.
+      const sliceBudget = createRoadSliceBudget();
+      for (let index = 0; index < paintedRoads.length; index += 1) {
+        const road = paintedRoads[index];
+        if (sliceBudget.shouldYieldAfter(road.points.length)) yield;
         const profile = roadElevationProfiles.get(road.id);
         const geometry = buildRoadGeometry(road, terrainClearance, profile, terrainIndex());
         // buildRoadGeometry returns an attribute-less geometry for a degenerate
