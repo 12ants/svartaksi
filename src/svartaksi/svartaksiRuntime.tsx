@@ -1105,6 +1105,7 @@ function WorldScene({
    * and long-distance pathfinding. Only reachable through the ?dev=1-gated debug bridge,
    * never from normal play. Returns true if it managed to board. */
   const debugBoardBusRef = useRef<() => boolean>(() => false);
+  const debugMoveWorldRef = useRef<(x: number, z: number) => boolean>(() => false);
   /** Last street name the bus resolved. Held so the saloon sign shows the road it is on
    * rather than blanking to a placeholder every time the bus passes between two label
    * points, which on a long way is most of the time. */
@@ -1333,6 +1334,7 @@ function WorldScene({
         canRelocate: canRelocateWorld(busLifecycleRef.current),
       }),
       setMode: (mode) => setCameraRef.current(mode),
+      moveWorld: (x, z) => debugMoveWorldRef.current(x, z),
       place: ({ x, y, z, yaw, pitch }) => {
         if (controlRef.current.cameraMode !== 'freecam') return false;
         freecamPositionRef.current.set(x, y, z);
@@ -2210,6 +2212,16 @@ function WorldScene({
       velocityRef.current = 0;
       setHint('PRESS B TO GET OFF');
       setMode('bus');
+    };
+
+    // Assigned here rather than at the bridge's install site because applyTeleport is
+    // declared further down this effect; the ref is the same indirection debugBoardBus
+    // already uses for the same reason.
+    debugMoveWorldRef.current = (x: number, z: number): boolean => {
+      if (!canRelocateWorld(busLifecycleRef.current)) return false;
+      const { lng, lat } = localToLngLat(START_LOCATION, { x, z });
+      applyTeleport(lng, lat);
+      return true;
     };
 
     debugBoardBusRef.current = (): boolean => {

@@ -71,6 +71,21 @@ export interface SvartaksiCameraBridge {
    * not in freecam, or when the target coincides with the camera (no direction to face).
    */
   lookAt(target: Vec3Like): boolean;
+  /**
+   * Moves the *world anchor* — the player — to a local ground point, so the streamer
+   * builds the world there.
+   *
+   * `place` alone is not enough to see somewhere: the world is streamed and built around
+   * the player, not around the camera, so a camera placed a few hundred metres out looks
+   * at bare terrain with roads floating on it, and further out at nothing at all. Worse,
+   * during the opening bus ride the player is *moving*, so a fixed world coordinate
+   * drifts out of the built region while you are looking at it — which reads exactly like
+   * a camera that is pointing the wrong way.
+   *
+   * Returns false when `canRelocate` is false (see the snapshot field), which is the
+   * silent refusal in `applyTeleport` made visible. Nothing here bypasses that guard.
+   */
+  moveTo(target: { x: number; z: number }): boolean;
 }
 
 declare global {
@@ -116,6 +131,8 @@ export interface InstallCameraDebugBridgeOptions {
   setMode: (mode: CameraMode) => void;
   /** Writes the freecam pose. Returns false when the camera is not in freecam. */
   place: (placement: Required<CameraPlacement>) => boolean;
+  /** Relocates the world anchor. Returns false when the world may not be relocated. */
+  moveWorld: (x: number, z: number) => boolean;
 }
 
 /**
@@ -129,6 +146,7 @@ export function installCameraDebugBridge({
   read,
   setMode,
   place,
+  moveWorld,
 }: InstallCameraDebugBridgeOptions): (() => void) | null {
   if (!isCameraDebugRequested(search)) return null;
 
@@ -154,6 +172,7 @@ export function installCameraDebugBridge({
       if (!facing) return false;
       return place({ ...current.position, yaw: facing.yaw, pitch: facing.pitch });
     },
+    moveTo: (target) => moveWorld(target.x, target.z),
   };
   target.__SVARTAKSI_CAMERA__ = bridge;
 

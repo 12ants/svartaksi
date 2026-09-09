@@ -75,6 +75,7 @@ interface Harness {
   target: Window & { __SVARTAKSI_CAMERA__?: SvartaksiCameraBridge };
   snapshot: SvartaksiCameraSnapshot | null;
   placed: Array<Required<CameraPlacement>>;
+  moved: Array<{ x: number; z: number }>;
   modes: string[];
   dispose: (() => void) | null;
   bridge: () => SvartaksiCameraBridge;
@@ -87,7 +88,7 @@ function harness(initial: Partial<SvartaksiCameraSnapshot> = {}, placeResult = t
       mode: 'freecam', position: { x: 1, y: 2, z: 3 }, yaw: 0.5, pitch: -0.25,
       canRelocate: true, ...initial,
     },
-    placed: [], modes: [], dispose: null,
+    placed: [], moved: [], modes: [], dispose: null,
     bridge: () => state.target.__SVARTAKSI_CAMERA__!,
   };
   state.dispose = installCameraDebugBridge({
@@ -96,6 +97,11 @@ function harness(initial: Partial<SvartaksiCameraSnapshot> = {}, placeResult = t
     read: () => state.snapshot,
     setMode: (mode) => { state.modes.push(mode); },
     place: (placement) => { if (!placeResult) return false; state.placed.push(placement); return true; },
+    moveWorld: (x, z) => {
+      if (!state.snapshot?.canRelocate) return false;
+      state.moved.push({ x, z });
+      return true;
+    },
   });
   return state;
 }
@@ -190,6 +196,24 @@ describe('installCameraDebugBridge', () => {
     expect(h.placed).toHaveLength(0);
   });
 
+  it('moves the world anchor so the streamer builds where the camera is looking', () => {
+    // place() alone only moves the camera; the world is built around the player, so a
+    // camera placed a few hundred metres out looks at bare terrain.
+    const h = harness();
+    expect(h.bridge().moveTo({ x: -282, z: 284 })).toBe(true);
+    expect(h.moved).toEqual([{ x: -282, z: 284 }]);
+  });
+
+  it('refuses to move the world when the runtime will not relocate it', () => {
+    // canRelocateWorld only permits a relocation while the bus is hidden, and
+    // applyTeleport refuses silently. Surfacing it as false is the whole point: during
+    // the opening ride a fixed world coordinate drifts out of the built region, which
+    // reads exactly like a camera pointing the wrong way.
+    const h = harness({ canRelocate: false });
+    expect(h.bridge().moveTo({ x: 10, z: 20 })).toBe(false);
+    expect(h.moved).toHaveLength(0);
+  });
+
   it('installs nothing when developer tools are not requested', () => {
     // isDevModeRequested currently returns true for every URL, which is this project's
     // own standing decision (see devMode.ts) rather than this bridge's. The install is
@@ -198,7 +222,7 @@ describe('installCameraDebugBridge', () => {
     const target = {} as Window & { __SVARTAKSI_CAMERA__?: SvartaksiCameraBridge };
     const read = vi.fn(() => null);
     const dispose = installCameraDebugBridge({
-      target, search: '', read, setMode: () => {}, place: () => true,
+      target, search: '', read, setMode: () => {}, place: () => true, moveWorld: () => true,
     });
     const installed = target.__SVARTAKSI_CAMERA__ !== undefined;
     expect(installed).toBe(dispose !== null);
