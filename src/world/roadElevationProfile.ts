@@ -479,24 +479,6 @@ function maxTwoPass(raw: number[], segmentLength: number[], maxGrade: number): n
   return raw.map((_, index) => Math.max(left[index], right[index]));
 }
 
-/** The dual of `maxTwoPass`: slope-limited erosion toward troughs, never above `cap`.
- * `cap` defaults to `Infinity` almost everywhere (no ceiling) except near a tunnel
- * crossing, where it dips to the required under-clearance height and then loosens back
- * toward `Infinity` at the same `maxGrade` moving away — the tunnel's own approach ramp. */
-function minTwoPass(cap: number[], segmentLength: number[], maxGrade: number): number[] {
-  const count = cap.length;
-  if (count < 2) return cap.slice();
-  const left = cap.slice();
-  for (let index = 1; index < count; index += 1) {
-    left[index] = Math.min(cap[index], left[index - 1] + segmentLength[index - 1] * maxGrade);
-  }
-  const right = cap.slice();
-  for (let index = count - 2; index >= 0; index -= 1) {
-    right[index] = Math.min(cap[index], right[index + 1] + segmentLength[index] * maxGrade);
-  }
-  return cap.map((_, index) => Math.min(left[index], right[index]));
-}
-
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
@@ -533,7 +515,7 @@ function segmentIndexAt(cumDist: number[], distanceAlong: number): number {
  * bridge/tunnel/ford/non-zero-layer evidence, any plain road resolved as the *other*
  * side of one of those roads' crossings (needed to size that crossing's clearance, even
  * though the plain road's own profile stays at its terrain baseline), and any road a
- * lift or dig has to ramp out through to get back to ground level (see
+ * lift has to ramp out through to get back to ground level (see
  * `propagateRampsAcrossJunctions`). Every other road — the overwhelming majority in an
  * ordinary city block — never enters this map at all: `buildRoadGeometry` falls back to
  * the plain terrain-only path for those, at zero extra cost. See `findRoadCrossings` for
@@ -582,7 +564,6 @@ export function* buildRoadElevationProfilesJob(
   const cumDist = new Map<string, number[]>();
   const segLengths = new Map<string, number[]>();
   const rawTarget = new Map<string, number[]>();
-  const rawCap = new Map<string, number[]>();
   const infoById = new Map<string, RoadStructureInfo>();
   const unresolved = new Map<string, RoadCrossing[]>();
   /** Roads a crossing actually moved off their own terrain baseline — the only ones with
@@ -607,21 +588,19 @@ export function* buildRoadElevationProfilesJob(
     cumDist.set(roadId, distances);
     segLengths.set(roadId, lengths);
     rawTarget.set(roadId, heights.slice());
-    rawCap.set(roadId, road.points.map(() => Infinity));
     infoById.set(roadId, structureInfo(road));
     unresolved.set(roadId, []);
   };
 
-  /** The road's height as it stands right now: its lower bounds dilated and its upper
-   * bounds eroded, both slope-limited, then intersected. The one place a height is ever
-   * read from, so the propagation below and the profiles emitted at the end cannot
-   * disagree about what a road's surface currently does. */
-  const currentHeights = (roadId: string): number[] => {
-    const lengths = segLengths.get(roadId)!;
-    const smoothedTarget = maxTwoPass(rawTarget.get(roadId)!, lengths, maxGrade);
-    const smoothedCap = minTwoPass(rawCap.get(roadId)!, lengths, maxGrade);
-    return smoothedTarget.map((value, position) => Math.min(value, smoothedCap[position]));
-  };
+  /** The road's height as it stands right now: its lower bounds dilated, slope-limited.
+   * The one place a height is ever read from, so the propagation below and the profiles
+   * emitted at the end cannot disagree about what a road's surface currently does.
+   *
+   * Only lower bounds: since every crossing is resolved by raising the winner, a height
+   * never travels downward and there is nothing to erode against. The upper-bound pass
+   * this used to intersect with existed solely for the tunnel dig. */
+  const currentHeights = (roadId: string): number[] =>
+    maxTwoPass(rawTarget.get(roadId)!, segLengths.get(roadId)!, maxGrade);
 
   const crossings = crossingsFromIndex(index);
   // Resolve lower structures first so stacked bridges clear the actual lower deck.
@@ -672,40 +651,41 @@ export function* buildRoadElevationProfilesJob(
 
     const roadId = crossing.roadId;
     const otherId = crossing.otherRoadId;
-    const otherInfo = infoById.get(otherId)!;
-    const roadBaseline = baseline.get(roadId)!;
     const otherBaseline = currentHeights(otherId);
     const roadDist = cumDist.get(roadId)!;
     const otherDist = cumDist.get(otherId)!;
 
     const otherHeightHere = baselineHeightAt(otherBaseline, otherDist, crossing.otherDistanceAlong);
-    const roadHeightHere = baselineHeightAt(roadBaseline, roadDist, crossing.distanceAlong);
 
-    if (otherInfo.structure === 'tunnel') {
-      // The lower side is an explicit tunnel: dig it down, leave the winner (already
-      // above by structure/layer) at its own baseline — a plain road doesn't rise just
-      // because something tunnels beneath it.
-      const segment = segmentIndexAt(otherDist, crossing.otherDistanceAlong);
-      const cap = rawCap.get(otherId)!;
-      const target = roadHeightHere - clearance;
-      cap[segment] = Math.min(cap[segment], target);
-      cap[segment + 1] = Math.min(cap[segment + 1], target);
-      offGround.add(otherId);
-    } else {
-      // No tunnel evidence on the loser: the winner (a bridge, or the higher-layer side
-      // of an otherwise plain pair) is the one that physically rises to clear it.
-      const segment = segmentIndexAt(roadDist, crossing.distanceAlong);
-      const target = rawTarget.get(roadId)!;
-      const required = otherHeightHere + clearance;
-      target[segment] = Math.max(target[segment], required);
-      target[segment + 1] = Math.max(target[segment + 1], required);
-      offGround.add(roadId);
-    }
+    // Every crossing is resolved the same way: the winner rises to clear the loser.
+    //
+    // A tunnel used to be dug *down* instead, which is what a tunnel physically does and
+    // is wrong for this renderer. The ground is one opaque, unbroken plane at y=0 with no
+    // hole in it, so nothing below grade can be seen: the cut, the retaining walls built
+    // for it, and the car driving down into it all disappeared under the plane, and a
+    // player watching a street ramp into the ground saw the road and their own vehicle
+    // swallowed by it. Digging expressed a truth the world had no way to show.
+    //
+    // Raising says the same thing in the vocabulary this world does have, and is the
+    // precedent BRIDGE_MIN_DECK_LIFT already set for spans that cross nothing. The
+    // tunnel's own carriageway is never painted either way (see surfaceVisibility), so
+    // what changes is only which side of the crossing carries the separation.
+    //
+    // The cost is honest and is the reason this is a judgement rather than a fix: a
+    // tunnel bored under a hill now nudges the road above it into a slight hump, where
+    // a real tunnel passes beneath undisturbed ground. That is a smaller and rarer wrong
+    // than a street that eats the player.
+    const segment = segmentIndexAt(roadDist, crossing.distanceAlong);
+    const target = rawTarget.get(roadId)!;
+    const required = otherHeightHere + clearance;
+    target[segment] = Math.max(target[segment], required);
+    target[segment + 1] = Math.max(target[segment + 1], required);
+    offGround.add(roadId);
   }
 
   yield;
   propagateRampsAcrossJunctions({
-    roads, index, roadById, roadIndexById, baseline, rawTarget, rawCap, offGround, ensure, currentHeights,
+    roads, index, roadById, roadIndexById, baseline, rawTarget, offGround, ensure, currentHeights,
   });
   yield;
 
@@ -774,7 +754,7 @@ const JUNCTION_HEIGHT_EPSILON = 1e-3;
 const MAX_JUNCTION_RELAXATION_STEPS = 20_000;
 
 /**
- * Carries a lift (or a dig) out through the junctions at a road's ends until it has
+ * Carries a lift out through the junctions at a road's ends until it has
  * ramped back to ground level, pulling whatever roads it passes through into the profile
  * set on the way.
  *
@@ -792,11 +772,11 @@ const MAX_JUNCTION_RELAXATION_STEPS = 20_000;
  * are left to the crossing resolution above. So the propagation can never flatten a
  * crossing it was built to separate.
  *
- * Mechanically this is a monotone relaxation over the same slope-limited bounds the rest
- * of the module uses: a raised node only ever raises a neighbour's lower bound, a dug one
- * only ever lowers a neighbour's upper bound, and a road is only revisited when one of
- * its own bounds actually moved. Because both bounds only travel in one direction and the
- * loop runs to quiescence, the result does not depend on which road is relaxed first.
+ * Mechanically this is a monotone relaxation over the same slope-limited bound the rest
+ * of the module uses: a raised node only ever raises a neighbour's lower bound, and a road
+ * is only revisited when that bound actually moved. Because the bound only travels in one
+ * direction and the loop runs to quiescence, the result does not depend on which road is
+ * relaxed first.
  * Ordinary roads are never touched: a road whose height matches its own terrain baseline
  * everywhere propagates nothing, which is what keeps a flat city's profile map empty.
  *
@@ -812,12 +792,11 @@ function propagateRampsAcrossJunctions(state: {
   roadIndexById: Map<string, number>;
   baseline: Map<string, number[]>;
   rawTarget: Map<string, number[]>;
-  rawCap: Map<string, number[]>;
   offGround: Set<string>;
   ensure: (roadId: string) => void;
   currentHeights: (roadId: string) => number[];
 }): void {
-  const { roads, index, roadById, roadIndexById, baseline, rawTarget, rawCap, offGround, ensure, currentHeights } = state;
+  const { roads, index, roadById, roadIndexById, baseline, rawTarget, offGround, ensure, currentHeights } = state;
   if (offGround.size === 0) return;
 
   const nodesAt = createNodeIndex(roads);
@@ -856,15 +835,9 @@ function propagateRampsAcrossJunctions(state: {
         const neighbour = index.roads[node.roadIndex];
         ensure(neighbour.id);
         if (!baseline.has(neighbour.id)) continue;
-        if (lift > 0) {
-          const target = rawTarget.get(neighbour.id)!;
-          if (heights[vertex] <= target[node.vertex] + JUNCTION_HEIGHT_EPSILON) continue;
-          target[node.vertex] = heights[vertex];
-        } else {
-          const cap = rawCap.get(neighbour.id)!;
-          if (heights[vertex] >= cap[node.vertex] - JUNCTION_HEIGHT_EPSILON) continue;
-          cap[node.vertex] = heights[vertex];
-        }
+        const target = rawTarget.get(neighbour.id)!;
+        if (heights[vertex] <= target[node.vertex] + JUNCTION_HEIGHT_EPSILON) continue;
+        target[node.vertex] = heights[vertex];
         offGround.add(neighbour.id);
         enqueue(neighbour.id);
       }

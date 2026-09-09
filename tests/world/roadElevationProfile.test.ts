@@ -125,7 +125,12 @@ describe('buildRoadElevationProfiles', () => {
     expect(groundProfile.samples.every((s) => s.height === groundProfile.samples[0].height)).toBe(true);
   });
 
-  it('digs a tunnel below whatever it resolves under', () => {
+  it('raises the road above a tunnel rather than digging the tunnel down', () => {
+    // The renderer's ground is one opaque unbroken plane with no hole in it, so nothing
+    // below grade can be seen — a dug road, its retaining walls, and the car driving it
+    // all disappear beneath the plane. Separation is expressed by raising instead, which
+    // is the vocabulary this world has (see BRIDGE_MIN_DECK_LIFT for the same reasoning
+    // applied to spans that cross nothing).
     const ground: WorldRoad = {
       id: 'ground-road', kind: 'primary', width: 10,
       points: [{ x: -50, z: 0 }, { x: 50, z: 0 }],
@@ -137,7 +142,32 @@ describe('buildRoadElevationProfiles', () => {
     const profiles = buildRoadElevationProfiles([ground, tunnel]);
     const groundHeight = sampleRoadElevation(profiles.get('ground-road')!, 50);
     const tunnelHeight = sampleRoadElevation(profiles.get('tunnel-road')!, 50);
+
+    // The clearance is still there, and the ground road is the side that moved.
     expect(groundHeight - tunnelHeight).toBeGreaterThanOrEqual(CROSSING_VERTICAL_CLEARANCE - 1e-6);
+    expect(groundHeight).toBeGreaterThan(tunnelHeight);
+    // The tunnel is left exactly where the terrain put it.
+    const tunnelSamples = profiles.get('tunnel-road')!.samples;
+    expect(tunnelSamples.every((s) => s.height === tunnelSamples[0].height)).toBe(true);
+  });
+
+  it('never puts any profiled road below its own at-grade baseline', () => {
+    // The invariant the whole change buys: heights only ever rise. Asserted over a
+    // snapshot with every kind of separation evidence in it at once.
+    const roads: WorldRoad[] = [
+      { id: 'bore', kind: 'primary', width: 10, structure: 'tunnel', layer: -2, points: [{ x: -60, z: 0 }, { x: 60, z: 0 }] },
+      { id: 'span', kind: 'primary', width: 10, structure: 'bridge', layer: 2, points: [{ x: -60, z: 30 }, { x: 60, z: 30 }] },
+      { id: 'cross-a', kind: 'residential', width: 8, points: [{ x: 0, z: -60 }, { x: 0, z: 60 }] },
+      { id: 'cross-b', kind: 'residential', width: 8, layer: -1, points: [{ x: 25, z: -60 }, { x: 25, z: 60 }] },
+      { id: 'link', kind: 'path', width: 3, points: [{ x: 60, z: 0 }, { x: 60, z: 30 }] },
+    ];
+    const profiles = buildRoadElevationProfiles(roads);
+    expect(profiles.size).toBeGreaterThan(0);
+    for (const profile of profiles.values()) {
+      for (const sample of profile.samples) {
+        expect(sample.height).toBeGreaterThanOrEqual(0);
+      }
+    }
   });
 
   it('keeps approach ramps within the configured max grade', () => {
@@ -304,10 +334,9 @@ describe('buildRoadElevationProfiles', () => {
     // metres of each other - a footpath ducking under one road and climbing onto a bridge
     // deck almost immediately after. No profile can satisfy both at maxGrade: the data is
     // asking for several metres of climb inside a few metres of run. When that happens the
-    // upper bound (the clearance something else needs to pass underneath) wins and the
-    // connection does not, which is the conservative half to keep - a deck end that does
-    // not line up looks wrong, but a dig that quietly fills in puts a road through
-    // whatever was passing under it.
+    // clearance something else needs to pass underneath wins and the connection does not,
+    // which is the conservative half to keep - a deck end that does not line up looks
+    // wrong, but losing the clearance puts a road through whatever was crossing it.
     const tunnel: WorldRoad = {
       id: 'tunnel', kind: 'residential', width: 8, structure: 'tunnel', layer: -1,
       points: [{ x: -40, z: 0 }, { x: -4, z: 0 }],
@@ -333,10 +362,17 @@ describe('buildRoadElevationProfiles', () => {
         expect(rise / run).toBeLessThanOrEqual(maxGrade + 1e-9);
       }
     }
-    // ...and the tunnel still clears the road passing over it, rather than being filled in
-    // by the deck's ramp reaching back through the link.
+    // ...and the crossing is still separated, by the road above rising rather than the
+    // tunnel dropping. Nothing goes below grade: this renderer's ground is one opaque
+    // unbroken plane, so a dug road and anything driving it simply vanish under it.
     const tunnelProfile = profiles.get('tunnel')!;
-    expect(Math.min(...tunnelProfile.samples.map((sample) => sample.height))).toBeLessThan(0);
+    const overProfile = profiles.get('over')!;
+    const tunnelAtCrossing = sampleRoadElevation(tunnelProfile, 20);
+    const overAtCrossing = sampleRoadElevation(overProfile, 40);
+    expect(overAtCrossing).toBeGreaterThan(tunnelAtCrossing);
+    for (const profile of profiles.values()) {
+      for (const sample of profile.samples) expect(sample.height).toBeGreaterThanOrEqual(0);
+    }
   });
 
   it('leaves an ordinary junction alone: a road at its own ground level propagates nothing', () => {

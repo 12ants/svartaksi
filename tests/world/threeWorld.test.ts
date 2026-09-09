@@ -1607,7 +1607,14 @@ describe('Three.js world geometry', () => {
       // Inclusion for routing/physics survives even though nothing is drawn: WorldData
       // still carries the tunnel, and its RoadElevationProfile still resolves.
       expect(data.roads.some((road) => road.id === 'under')).toBe(true);
-      expect(scene.getObjectByName('world:roads')?.children.length).toBe(1); // only 'over'
+      // Carriageways only — 'over' is the single one drawn. It also brings a parapet and
+      // supports now: separation is resolved by raising it over the bore rather than
+      // digging the bore under it, so the street that crosses a tunnel genuinely is a
+      // short overpass and is built like one.
+      const structures = new Set(['world:road-railings', 'world:bridge-piers']);
+      const drawn = (scene.getObjectByName('world:roads')?.children ?? [])
+        .filter((child) => !structures.has(child.name));
+      expect(drawn).toHaveLength(1);
       expect(world.getRoadElevationProfiles().has('under')).toBe(true);
     });
 
@@ -1727,10 +1734,11 @@ describe('Three.js world geometry', () => {
       }
     });
 
-    it('walls the cutting a tunnel approach ramp is dug into', () => {
-      // A tunnel bore is never painted, but the approach carrying the street down to it
-      // is an ordinary visible road that the profile digs. The ground is a solid plane at
-      // grade, so before this the ribbon simply vanished into it and the car sank with it.
+    it('keeps a tunnel approach ramp at or above grade', () => {
+      // Separation is expressed by raising the road above, never by digging this one:
+      // the ground is one opaque unbroken plane, so a dug road and the car driving it
+      // would simply vanish beneath it. Nothing is drawn below grade, and there is no
+      // cutting geometry any more because there is no cutting.
       const scene = new THREE.Scene();
       const world = createThreeWorld(scene);
       world.replace({
@@ -1743,34 +1751,10 @@ describe('Three.js world geometry', () => {
       });
 
       const roads = scene.getObjectByName('world:roads')?.children ?? [];
-      const trench = roads.find((child) => child.name === 'world:tunnel-trenches') as THREE.Mesh | undefined;
-      expect(trench).toBeInstanceOf(THREE.Mesh);
-      expect(trench!.castShadow).toBe(true);
-
-      // The approach is dug several metres down at the portal and climbs back to grade,
-      // so the walls span that range: down to the road surface, up past grade.
-      const position = trench!.geometry.getAttribute('position');
-      let minY = Infinity;
-      let maxY = -Infinity;
-      for (let index = 0; index < position.count; index += 1) {
-        minY = Math.min(minY, position.getY(index));
-        maxY = Math.max(maxY, position.getY(index));
-      }
-      expect(minY).toBeLessThan(-2);
-      expect(maxY).toBeGreaterThan(0);
-    });
-
-    it('builds no cutting for a road that never leaves grade', () => {
-      const scene = new THREE.Scene();
-      const world = createThreeWorld(scene);
-      world.replace({
-        ...worldData('maplibre'),
-        roads: [
-          { id: 'flat', kind: 'residential', width: 8, points: [{ x: -40, z: 0 }, { x: 40, z: 0 }] },
-        ],
-      });
-      const roads = scene.getObjectByName('world:roads')?.children ?? [];
       expect(roads.some((child) => child.name === 'world:tunnel-trenches')).toBe(false);
+      for (const profile of world.getRoadElevationProfiles().values()) {
+        for (const sample of profile.samples) expect(sample.height).toBeGreaterThanOrEqual(0);
+      }
     });
 
     it('reveals hidden roads only through the explicit debug override, not by default', () => {
