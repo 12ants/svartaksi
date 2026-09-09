@@ -523,11 +523,12 @@ describe('Three.js world geometry', () => {
       ],
     });
 
-    // Carriageways only: the roads group also holds the merged parapet mesh, which is
-    // ordinary opaque geometry in its own material and plays no part in the road layering
-    // this test is about.
+    // Carriageways only: the roads group also holds the merged parapet and pier meshes,
+    // which are ordinary opaque geometry in their own materials and play no part in the
+    // road layering this test is about.
+    const STRUCTURE_MESHES = new Set(['world:road-railings', 'world:bridge-piers']);
     const meshes = (scene.getObjectByName('world:roads')?.children ?? [])
-      .filter((child): child is THREE.Mesh => child instanceof THREE.Mesh && child.name !== 'world:road-railings');
+      .filter((child): child is THREE.Mesh => child instanceof THREE.Mesh && !STRUCTURE_MESHES.has(child.name));
     const materialOf = (mesh: THREE.Mesh) => mesh.material as THREE.ShaderMaterial;
     const decks = meshes.filter((mesh) => materialOf(mesh).depthWrite);
     const grounded = meshes.filter((mesh) => !materialOf(mesh).depthWrite);
@@ -1629,9 +1630,70 @@ describe('Three.js world geometry', () => {
       world.replace(data);
 
       const roads = scene.getObjectByName('world:roads')?.children ?? [];
-      // One carriageway mesh, plus the parapet a tagged bridge always gets.
-      expect(roads.filter((child) => child.name !== 'world:road-railings')).toHaveLength(1);
+      // One carriageway mesh, plus the parapet a tagged bridge always gets. Supports are
+      // excluded alongside the parapet: whether this span stands high enough off its own
+      // baseline to earn any is the elevation profile's business, not this test's.
+      const structures = new Set(['world:road-railings', 'world:bridge-piers']);
+      expect(roads.filter((child) => !structures.has(child.name))).toHaveLength(1);
       expect(roads.some((child) => child.name === 'world:road-railings')).toBe(true);
+    });
+
+    it('stands supports under a deck that is genuinely in the air', () => {
+      // The end-to-end check for bridgePiers: the pure placement module has its own
+      // suite, so what this proves is the wiring — that a real elevated span reaches it
+      // and that the merged mesh lands in the scene with shadows on, which is the whole
+      // point (a deck was already casting a shadow with nothing under it casting one).
+      const scene = new THREE.Scene();
+      const world = createThreeWorld(scene);
+      world.replace({
+        ...worldData('maplibre'),
+        roads: [
+          { id: 'span', kind: 'primary', width: 10, structure: 'bridge', layer: 1, points: [{ x: -60, z: 0 }, { x: 60, z: 0 }] },
+          { id: 'under', kind: 'residential', width: 8, points: [{ x: 0, z: -60 }, { x: 0, z: 60 }] },
+        ],
+      });
+
+      const roads = scene.getObjectByName('world:roads')?.children ?? [];
+      const piers = roads.find((child) => child.name === 'world:bridge-piers');
+      expect(piers).toBeInstanceOf(THREE.Mesh);
+      expect((piers as THREE.Mesh).castShadow).toBe(true);
+      expect((piers as THREE.Mesh).receiveShadow).toBe(true);
+
+      // Supports stop at the underside of the deck and reach down toward the baseline,
+      // rather than floating at deck height or hanging in the air.
+      const position = (piers as THREE.Mesh).geometry.getAttribute('position');
+      let minY = Infinity;
+      let maxY = -Infinity;
+      for (let index = 0; index < position.count; index += 1) {
+        minY = Math.min(minY, position.getY(index));
+        maxY = Math.max(maxY, position.getY(index));
+      }
+      expect(maxY).toBeLessThan(roadSurfaceElevation({ id: 'span', kind: 'primary', width: 10, points: [] }) + 100);
+      expect(minY).toBeLessThan(maxY - 0.5);
+    });
+
+    it('keeps supports out of the carriageway running beneath the deck', () => {
+      // A column dropped into the street the viaduct crosses would be a concrete block in
+      // a live road, and precisely at the underpass the deck exists to clear.
+      const scene = new THREE.Scene();
+      const world = createThreeWorld(scene);
+      world.replace({
+        ...worldData('maplibre'),
+        roads: [
+          { id: 'span', kind: 'primary', width: 10, structure: 'bridge', layer: 1, points: [{ x: -60, z: 0 }, { x: 60, z: 0 }] },
+          { id: 'under', kind: 'residential', width: 8, points: [{ x: 0, z: -60 }, { x: 0, z: 60 }] },
+        ],
+      });
+
+      const roads = scene.getObjectByName('world:roads')?.children ?? [];
+      const piers = roads.find((child) => child.name === 'world:bridge-piers') as THREE.Mesh | undefined;
+      expect(piers).toBeDefined();
+      const position = piers!.geometry.getAttribute('position');
+      // The crossing street runs along x=0 and is 8m wide, so nothing may stand within
+      // half its width of that line.
+      for (let index = 0; index < position.count; index += 1) {
+        expect(Math.abs(position.getX(index))).toBeGreaterThan(4);
+      }
     });
 
     it('reveals hidden roads only through the explicit debug override, not by default', () => {

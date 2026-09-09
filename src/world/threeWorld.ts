@@ -30,6 +30,7 @@ import { generateStreetLightsJob, type LampPlacement } from './streetLights';
 import { roadRibbonFrames, roadEndpointExtension, extendRoadEndpoints } from './roadRibbon';
 import { bridgeDeckColliders, bridgeRailingColliders, type BridgeCollider } from './bridgeColliders';
 import { buildRoadRailingGeometry, createRailingMaterial } from './bridgeRailings';
+import { buildBridgePierGeometry, createPierMaterial, createRoadObstructionTest, pierPlacements } from './bridgePiers';
 import { generateBusStopsJob, type BusStopPlacement } from './busStops';
 import { generateMailboxesJob, mappedMailboxesJob, type MailboxPlacement } from './mailboxes';
 import { createTrafficLights, findTrafficSignalsJob, type TrafficLightBatch } from '../svartaksi/trafficLights';
@@ -2195,6 +2196,9 @@ export function createThreeWorld(scene: THREE.Scene): ThreeWorld {
        * mesh at the end, like the carriageways themselves, rather than one draw call per
        * bridge. Usually empty: a snapshot with no grade separation in it has no railings. */
       const railings: THREE.BufferGeometry[] = [];
+      /** Columns and abutments under whatever decks this build contains, merged into one
+       * mesh alongside the parapets and for the same reason. Usually empty. */
+      const piers: THREE.BufferGeometry[] = [];
       // Sliced by accumulated polyline points rather than by road count: buildRoadGeometry
       // emits vertices per point, so eight 2-point stubs and eight 300-point ring roads
       // are wildly different amounts of work that a fixed road-count cadence charges the
@@ -2233,6 +2237,25 @@ export function createThreeWorld(scene: THREE.Scene): ThreeWorld {
             staging.bridgeColliders.push(...bridgeRailingColliders(road.id, railing));
             if (nearEnoughForDetail) railings.push(railing);
             else railing.dispose();
+          }
+          // Supports are built only within the detail radius, like the parapets: they are
+          // one merged mesh culled as a unit, so every column in it is redrawn into the
+          // shadow map whether or not it is near the light's frustum.
+          //
+          // A support is skipped where another road's deck already occupies the ground —
+          // the same junction lookup the parapets use to open themselves at a merge. A
+          // column dropped into the carriageway running under the viaduct would be a
+          // concrete block in a live road, and precisely at the underpass the deck exists
+          // to cross. Nothing is added to `bridgeColliders`: these are visual supports,
+          // and making them solid without first proving no bus route threads between them
+          // could wall a road off from the routing graph that still believes it is open.
+          if (nearEnoughForDetail) {
+            const supports = pierPlacements(
+              samples.points, samples.elevations, samples.lifts, thickness, road.width,
+              { isObstructed: createRoadObstructionTest(nearbyRoads, road.id, samples.points) },
+            );
+            const pier = buildBridgePierGeometry(supports);
+            if (pier) piers.push(pier);
           }
           yield;
         }
@@ -2286,6 +2309,19 @@ export function createThreeWorld(scene: THREE.Scene): ThreeWorld {
         mesh.renderOrder = ROAD_STYLE_RENDER_ORDER[styleKey] + (elevated ? ELEVATED_ROAD_RENDER_ORDER_OFFSET : 0);
         mesh.userData[INSPECTION_USER_DATA_KEY] = records;
         roads.add(mesh);
+      }
+
+      if (piers.length) {
+        yield;
+        const merged = mergeGeometries(piers, false);
+        for (const geometry of piers) geometry.dispose();
+        if (merged) {
+          const pierMesh = new THREE.Mesh(merged, createPierMaterial());
+          pierMesh.name = 'world:bridge-piers';
+          pierMesh.castShadow = true;
+          pierMesh.receiveShadow = true;
+          roads.add(pierMesh);
+        }
       }
 
       if (railings.length) {
