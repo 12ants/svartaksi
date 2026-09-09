@@ -184,7 +184,14 @@ export async function fetchTileFeatures(
   priority: FetchPriority = 'foreground',
 ): Promise<MapLibreFeature[]> {
   if (!keys.length) return [];
-  const template = await resolveTileTemplate();
+  // The tile-URL template is resolved lazily, on the first tile that actually misses
+  // locally — not up front. Resolving it eagerly made a network round trip a
+  // precondition of *every* load, including one served entirely from the committed
+  // snapshot in `vendor/worldcache`, so a machine with no route to the tile host failed
+  // to load a world whose every tile was already on disk. That defeated the snapshot's
+  // whole stated purpose (see CLAUDE.md: "so first load works offline"), and it
+  // contradicted the local path's own contract below, which promises the local branch is
+  // never *required* to succeed — the reverse has to hold too.
   const results = new Array<MapLibreFeature[] | null>(keys.length).fill(null);
   let failures = 0;
   let next = 0;
@@ -223,7 +230,7 @@ export async function fetchTileFeatures(
           if (signal.aborted) throw error;
         }
         if (!response || !response.ok) {
-          const url = template
+          const url = (await resolveTileTemplate())
             .replace('{z}', String(key.z))
             .replace('{x}', String(key.x))
             .replace('{y}', String(key.y));

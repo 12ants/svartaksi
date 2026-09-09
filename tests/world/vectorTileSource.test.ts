@@ -142,9 +142,28 @@ describe('vector tile source', () => {
   });
 
   it('retries the tile index after a failed lookup instead of caching the failure', async () => {
-    fetchMock.mockImplementationOnce(async () => ({ ok: false, status: 500 } as unknown as Response));
+    // Fails the index by URL rather than by call order: the index is now resolved lazily,
+    // on the first tile that actually misses locally, so it is no longer the first fetch
+    // the source makes.
+    let indexAttempts = 0;
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === INDEX_URL) {
+        indexAttempts += 1;
+        if (indexAttempts === 1) return { ok: false, status: 500 } as unknown as Response;
+        return ok({ tiles: [TEMPLATE] });
+      }
+      if (input.startsWith('/worldcache/tiles/')) {
+        return { ok: false, status: 404, arrayBuffer: async () => { throw new Error('no body'); } } as unknown as Response;
+      }
+      return ok(null);
+    });
 
-    await expect(fetchTileFeatures(keys(1), new AbortController().signal)).rejects.toThrow(/tile index/i);
+    // The load still fails, but now as the aggregate tile failure rather than a bare
+    // "tile index" error: resolving the index lazily puts it inside the per-tile try, so
+    // its failure is reported the same way any other failure to obtain a tile is. The
+    // property this test exists for is unchanged — the rejection is not memoized, so the
+    // next load asks again rather than replaying it forever.
+    await expect(fetchTileFeatures(keys(1), new AbortController().signal)).rejects.toThrow(/vector tile/i);
     await expect(fetchTileFeatures(keys(1), new AbortController().signal)).resolves.toEqual([]);
     expect(indexCalls()).toHaveLength(2);
   });
@@ -233,6 +252,36 @@ describe('local-tile-first fetch', () => {
     await fetchTileFeatures(keys(1), new AbortController().signal);
     expect(fetchMock).toHaveBeenCalledWith('/worldcache/tiles/14/9000/4818.pbf', expect.anything());
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining('tiles.example'), expect.anything());
+  });
+
+  it('loads a fully-local world with no route to the tile host at all', async () => {
+    // The offline case the committed snapshot exists for (CLAUDE.md: "so first load
+    // works offline"). Every tile is on disk, so nothing may touch the network —
+    // including the tile-index lookup, which used to be awaited up front and so made a
+    // reachable tile host a precondition of *every* load. With the host unreachable the
+    // whole world failed to load even though not one byte of it was needed from there.
+    fetchMock = vi.fn(async (input: string) => {
+      if (input === INDEX_URL) throw new TypeError('Failed to fetch');
+      if (input.startsWith('/worldcache/tiles/')) return ok(emptyTile());
+      throw new Error(`Unexpected fetch: ${input}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(fetchTileFeatures(keys(3), new AbortController().signal)).resolves.toBeDefined();
+    expect(fetchMock).not.toHaveBeenCalledWith(INDEX_URL);
+  });
+
+  it('still resolves the tile index when a tile does have to come from the network', async () => {
+    // The other half of the contract: laziness must not mean never.
+    fetchMock = vi.fn(async (input: string) => {
+      if (input === INDEX_URL) return ok({ tiles: [TEMPLATE] });
+      if (input.startsWith('/worldcache/tiles/')) return { ok: false, status: 404 } as Response;
+      return ok(emptyTile());
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await fetchTileFeatures(keys(1), new AbortController().signal);
+    expect(fetchMock).toHaveBeenCalledWith(INDEX_URL);
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('tiles.example'), expect.anything());
   });
 
   it('falls through to the network when the local tile 404s', async () => {
