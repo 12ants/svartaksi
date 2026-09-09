@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import {
-  applyCameraSettings, clampPlacementAboveGround,
+  applyCameraSettings, clampPlacementAboveGround, pullPlacementClearOfObstruction,
   FOOT_RIG, INTERIOR_RIG, resolveCameraPlacement, VEHICLE_RIG,
 } from '../../src/svartaksi/cameraRig';
 import {
@@ -268,5 +268,99 @@ describe('clampPlacementAboveGround', () => {
     const deckHeight = 6.4;
     const onDeck = clampPlacementAboveGround(placementAt(5), () => deckHeight, 0.6);
     expect(onDeck.position.y).toBeCloseTo(deckHeight + 0.6, 6);
+  });
+});
+
+describe('pullPlacementClearOfObstruction', () => {
+  const place = (pos: [number, number, number], look: [number, number, number]) => ({
+    position: new THREE.Vector3(...pos),
+    lookAt: new THREE.Vector3(...look),
+  });
+  /** A wall standing across the sightline at `at` metres from the look target. */
+  const wallAt = (at: number) => () => at;
+  const clear = () => null;
+
+  it('leaves a clear sightline exactly where it was', () => {
+    const p = place([0, 3, 10], [0, 1, 0]);
+    const before = p.position.clone();
+    pullPlacementClearOfObstruction(p, clear, 0.6, 1.2);
+    expect(p.position.distanceTo(before)).toBeCloseTo(0, 10);
+  });
+
+  it('pulls the camera in to just short of an obstruction', () => {
+    // The cinematic case: a facade between the camera and the player. The boom shortens;
+    // the camera does not rise over the building, which would swing the shot to a roof
+    // view every time the player walked past one.
+    const p = place([0, 1, 10], [0, 1, 0]);
+    pullPlacementClearOfObstruction(p, wallAt(6), 0.6, 1.2);
+    expect(p.position.z).toBeCloseTo(5.4, 6);
+    expect(p.position.y).toBeCloseTo(1, 6);
+  });
+
+  it('never moves the look target', () => {
+    // Being pushed off an obstruction must not also re-aim the shot.
+    const p = place([0, 5, 10], [3, 1, 2]);
+    pullPlacementClearOfObstruction(p, wallAt(4), 0.6, 1.2);
+    expect(p.lookAt.toArray()).toEqual([3, 1, 2]);
+  });
+
+  it('keeps the camera on its own sightline', () => {
+    // Whatever it does, the composition's direction is preserved — only the distance
+    // along it changes.
+    const p = place([6, 8, -3], [1, 2, 1]);
+    const dir = p.position.clone().sub(p.lookAt).normalize();
+    pullPlacementClearOfObstruction(p, wallAt(3), 0.5, 1.2);
+    const after = p.position.clone().sub(p.lookAt);
+    expect(after.clone().normalize().distanceTo(dir)).toBeCloseTo(0, 9);
+    expect(after.length()).toBeCloseTo(2.5, 6);
+  });
+
+  it('holds the boom at the minimum rather than collapsing onto the subject', () => {
+    // A camera wedged into a corner should clip a little, not end up inside the body it
+    // is framing.
+    const p = place([0, 1, 10], [0, 1, 0]);
+    pullPlacementClearOfObstruction(p, wallAt(0.2), 0.6, 1.2);
+    expect(p.position.distanceTo(p.lookAt)).toBeCloseTo(1.2, 6);
+  });
+
+  it('ignores a hit further away than the camera itself', () => {
+    // A wall behind the camera is not between it and the subject.
+    const p = place([0, 1, 5], [0, 1, 0]);
+    pullPlacementClearOfObstruction(p, wallAt(40), 0.6, 1.2);
+    expect(p.position.z).toBeCloseTo(5, 6);
+  });
+
+  it('does nothing for a camera sitting on its own target', () => {
+    // The first-person modes are inside the body they follow by design, and have no
+    // sightline to test.
+    const p = place([2, 1, 3], [2, 1, 3]);
+    pullPlacementClearOfObstruction(p, wallAt(0.1), 0.6, 1.2);
+    expect(p.position.toArray()).toEqual([2, 1, 3]);
+  });
+
+  it('casts from the target outward, so the nearest obstruction wins', () => {
+    // Casting inward from the camera would find the far side of a wall the camera is
+    // already behind, and happily leave it there.
+    const seen: Array<[number, number, number, number]> = [];
+    const p = place([0, 4, 12], [0, 2, 0]);
+    pullPlacementClearOfObstruction(p, (fx, fy, fz, dx, dy, dz, max) => {
+      seen.push([fx, fy, fz, max]);
+      expect(Math.hypot(dx, dy, dz)).toBeCloseTo(1, 9);
+      return null;
+    }, 0.6, 1.2);
+    expect(seen[0][0]).toBe(0);
+    expect(seen[0][1]).toBe(2);   // the look target, not the camera
+    expect(seen[0][2]).toBe(0);
+    expect(seen[0][3]).toBeCloseTo(Math.hypot(2, 12), 6);
+  });
+
+  it('works for a top-down boom, which is straight up', () => {
+    // top-down was excluded from clamping on the reasoning that it is far above
+    // everything by construction — false under a tree, where its fixed boom puts it
+    // inside the canopy.
+    const p = place([0, 18, 0.01], [0, 1, 0]);
+    pullPlacementClearOfObstruction(p, wallAt(9), 0.6, 1.2);
+    expect(p.position.distanceTo(p.lookAt)).toBeCloseTo(8.4, 6);
+    expect(p.position.y).toBeLessThan(18);
   });
 });

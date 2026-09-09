@@ -207,7 +207,7 @@ import { installCameraDebugBridge, type SvartaksiCameraSnapshot } from './camera
 import { isDevModeRequested } from './devMode';
 import { pushLog } from './gameLogger';
 import {
-  applyCameraSettings, clampPlacementAboveGround,
+  applyCameraSettings, clampPlacementAboveGround, pullPlacementClearOfObstruction,
   FOOT_RIG, HORSE_RIG, INTERIOR_RIG, OPENING_CAM_INTRO_DURATION_MS, resolveCameraPlacement,
   resolveOpeningIntroPlacement, VEHICLE_RIG,
 } from './cameraRig';
@@ -986,6 +986,40 @@ function WorldScene({
    * every frame. Four older call sites in this file still spell the same fallback out
    * inline; they predate this and are left alone rather than widening the change.
    */
+  /**
+   * Distance from a camera's look target to the first solid thing along its sightline, or
+   * null when the line is clear — what `pullPlacementClearOfObstruction` needs to shorten
+   * a boom that would otherwise leave the camera inside a building or a tree.
+   *
+   * A physics raycast rather than a height sample, because the question is genuinely
+   * "is something in the way", which a height under the camera cannot answer: a camera
+   * standing inside a wall is still comfortably above the floor beneath it.
+   *
+   * Cast from the target outward rather than from the camera inward, so the *nearest*
+   * obstruction to the player is the one honoured. Casting the other way would find the
+   * far side of a wall the camera is already behind and happily leave it there.
+   */
+  const cameraSightlineHit = useCallback((
+    fromX: number, fromY: number, fromZ: number,
+    dirX: number, dirY: number, dirZ: number,
+    maxDistance: number,
+  ): number | null => {
+    const physics = physicsRef.current;
+    if (!physics) return null;
+    const hit = physics.raycast(
+      new THREE.Vector3(fromX, fromY, fromZ),
+      new THREE.Vector3(dirX, dirY, dirZ),
+      maxDistance,
+      null,
+      // Buildings and props only. The ray starts inside the body the camera is framing,
+      // so anything that can be a *subject* — the car, the pill, the bus — would be hit
+      // at zero distance and collapse every shot onto its own target. Restricting the
+      // mask says what is actually meant: a camera is blocked by the world, never by
+      // what it is looking at.
+      CATEGORY_BUILDINGS | CATEGORY_PROPS,
+    );
+    return hit ? hit.distance : null;
+  }, []);
   const groundHeightAt = useCallback((x: number, z: number, maxHeight = Infinity) => (physicsRef.current
     ? physicsRef.current.groundHeightAt(x, z, maxHeight)
     : terrainHeightAtXZIndexed(x, z, terrainIndexRef.current)), []);
@@ -3676,11 +3710,24 @@ function WorldScene({
         activeHeading,
         time - cameraModeEnteredMsRef.current,
       );
-      // Top-down is already far above everything by construction, and the scripted intro
-      // is composed rather than followed, so neither wants holding off the ground. See
-      // clampPlacementAboveGround for what the rest are being saved from.
-      if (introPlacement === null && control.cameraMode !== 'top-down') {
+      // The scripted intro is composed rather than followed, so it is left alone. Every
+      // selectable mode gets both corrections: held off the ground it is flying over, and
+      // pulled in along its own sightline so it is never left standing inside a building
+      // or a tree.
+      //
+      // Top-down used to be excluded from the ground clamp on the reasoning that it is
+      // far above everything by construction. That holds over open ground and fails
+      // anywhere with a tree or a tall building: its boom is a fixed height above the
+      // player, so it ends up inside the canopy. It is clamped and pulled in like the
+      // rest now.
+      if (introPlacement === null) {
         clampPlacementAboveGround(placement, groundHeightAt, CAMERA.groundClearance);
+        pullPlacementClearOfObstruction(
+          placement,
+          cameraSightlineHit,
+          CAMERA.groundClearance,
+          CAMERA.minBoomDistance,
+        );
       }
       const cameraBlend = 1 - Math.exp(-dt / cameraEaseTau(control.camera.responsiveness));
       applyCameraTransform(state.camera, placement.position, placement.lookAt, cameraBlend);

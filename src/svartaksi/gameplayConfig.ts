@@ -106,6 +106,16 @@ export const CAMERA = {
    * surface, small enough that a camera pushed up by it still frames the body.
    */
   groundClearance: 0.6,
+  /**
+   * Shortest the follow boom is ever pulled to when something solid stands between the
+   * camera and what it is framing, in metres.
+   *
+   * A camera pulled all the way to its look target ends up inside the body it follows,
+   * which reads as the shot collapsing rather than as a wall being avoided. At roughly
+   * arm's length the body still fills the frame and the shot stays legible, so a camera
+   * wedged into a corner clips a little instead of collapsing.
+   */
+  minBoomDistance: 1.2,
 } as const;
 
 /** Fixed-tick simulation timing and physics thresholds. */

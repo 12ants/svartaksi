@@ -317,6 +317,69 @@ export function applyCameraSettings(rig: CameraRig, settings: CameraSettings): C
  * mode that never needs it (it is already far above everything, by construction), and the
  * caller is what decides that rather than a mode check buried in here.
  */
+/**
+ * Pulls a placement's camera in along its own sightline until nothing solid stands
+ * between it and what it is looking at.
+ *
+ * The ground clamp below cannot express this. It asks for the height of the walkable
+ * surface *under* the camera, capped below the camera itself, so a camera standing inside
+ * a building reports the floor beneath it, is already above that floor, and is left
+ * exactly where it was — inside the wall. Observed on `cinematic`, whose side-and-back
+ * offset puts it through the facade of whatever the player is standing next to, and on
+ * `top-down`, which was excluded from clamping altogether on the reasoning that it is
+ * "far above everything by construction" — true over open ground, false under a tree or
+ * beside anything taller than its own boom.
+ *
+ * Pulling in rather than rising is what a third-person camera wants: rising to clear a
+ * wall swings the shot to a rooftop view every time the player walks past a building,
+ * while pulling in keeps the composition and merely shortens the boom, which is what the
+ * shot already does at every other distance. The look target is never moved — being
+ * pushed off an obstruction should not also re-aim the shot.
+ *
+ * `firstBlockingHit` returns the distance from `lookAt` to the first solid thing along
+ * the sightline, or null for a clear line. Injected rather than imported so this stays
+ * pure and testable with no scene and no physics world, exactly like the ground clamp.
+ *
+ * A hit closer than `minDistance` is not worth honouring: the camera would be inside the
+ * player's own head. There the boom is held at `minDistance` and the shot is allowed to
+ * clip rather than collapsing to a point.
+ */
+export function pullPlacementClearOfObstruction(
+  placement: CameraPlacement,
+  firstBlockingHit: (
+    fromX: number, fromY: number, fromZ: number,
+    dirX: number, dirY: number, dirZ: number,
+    maxDistance: number,
+  ) => number | null,
+  clearance: number,
+  minDistance: number,
+): CameraPlacement {
+  const dx = placement.position.x - placement.lookAt.x;
+  const dy = placement.position.y - placement.lookAt.y;
+  const dz = placement.position.z - placement.lookAt.z;
+  const boom = Math.hypot(dx, dy, dz);
+  // A camera sitting on its own target has no sightline to test — the first-person modes,
+  // which are inside the body they follow by design.
+  if (boom < 1e-6) return placement;
+
+  const hit = firstBlockingHit(
+    placement.lookAt.x, placement.lookAt.y, placement.lookAt.z,
+    dx / boom, dy / boom, dz / boom,
+    boom,
+  );
+  if (hit === null) return placement;
+
+  // Stop short of the surface by `clearance`, so the near plane does not cut into it.
+  const pulled = Math.max(minDistance, Math.min(boom, hit - clearance));
+  if (pulled >= boom) return placement;
+  placement.position.set(
+    placement.lookAt.x + (dx / boom) * pulled,
+    placement.lookAt.y + (dy / boom) * pulled,
+    placement.lookAt.z + (dz / boom) * pulled,
+  );
+  return placement;
+}
+
 export function clampPlacementAboveGround(
   placement: CameraPlacement,
   groundHeightAt: (x: number, z: number, maxHeight?: number) => number,
