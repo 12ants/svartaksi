@@ -1611,7 +1611,11 @@ describe('Three.js world geometry', () => {
       expect(world.getRoadElevationProfiles().has('under')).toBe(true);
     });
 
-    it('keeps a fully-covered (negative-layer, non-tunnel) ground road hidden as the conservative fallback', () => {
+    it('draws a negative-layer (underpass) ground road, unlike a tunnel', () => {
+      // A negative layer is ordering evidence, not a structure: the elevation profile
+      // lifts the road above rather than digging this one, so the underpass is an
+      // ordinary at-grade ribbon. Hiding it left a hole in the street grid under every
+      // bridge, which reads worse than the case the old caution guarded against.
       const scene = new THREE.Scene();
       const world = createThreeWorld(scene);
       const data = worldData('maplibre');
@@ -1619,7 +1623,34 @@ describe('Three.js world geometry', () => {
       world.replace(data);
 
       expect(data.roads.some((road) => road.id === 'covered')).toBe(true);
-      expect(scene.getObjectByName('world:roads')?.children.length).toBe(0);
+      expect(scene.getObjectByName('world:roads')?.children.length).toBe(1);
+    });
+
+    it('draws the underpass beneath the deck that crosses it, without a gap in the grid', () => {
+      // The end-to-end shape of the change: both roads reach the scene, and the crossing
+      // deck is lifted clear above the carriageway rather than the two fighting for the
+      // same pixels.
+      const scene = new THREE.Scene();
+      const world = createThreeWorld(scene);
+      world.replace({
+        ...worldData('maplibre'),
+        roads: [
+          { id: 'span', kind: 'primary', width: 10, structure: 'bridge', layer: 1, points: [{ x: -40, z: 0 }, { x: 40, z: 0 }] },
+          { id: 'below', kind: 'residential', width: 8, structure: 'ground', layer: -1, points: [{ x: 0, z: -40 }, { x: 0, z: 40 }] },
+        ],
+      });
+
+      const structures = new Set(['world:road-railings', 'world:bridge-piers']);
+      const carriageways = (scene.getObjectByName('world:roads')?.children ?? [])
+        .filter((child) => !structures.has(child.name));
+      expect(carriageways.length).toBeGreaterThan(0);
+
+      // Where they cross, the deck is above the underpass by a real clearance rather
+      // than coplanar with it.
+      const profiles = world.getRoadElevationProfiles();
+      const deckHeight = roadElevationAtPoint(0, 0, profiles, 0.5);
+      expect(deckHeight).not.toBeNull();
+      expect(deckHeight!).toBeGreaterThan(2);
     });
 
     it('keeps a bridge surface-visible', () => {
