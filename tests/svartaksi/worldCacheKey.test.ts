@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { BUS_CORRIDOR_PAD_METERS, worldCacheKey } from '../../src/svartaksi/svartaksiRuntime';
-import { OPENING_RIDE, START_LOCATION, WORLD_DATA_RADIUS } from '../../src/svartaksi/config';
+import { START_LOCATION, WORLD_DATA_RADIUS } from '../../src/svartaksi/config';
+
+// An arbitrary second point, distinct from START_LOCATION, for exercising the corridor
+// suffix below — its coordinates are not meaningful, only that they differ.
+const OTHER_POINT = { lng: START_LOCATION.lng + 0.01, lat: START_LOCATION.lat + 0.01 };
 
 // Mirrors worldCacheKey's own grid, not a plain decimal round — a raw `.toFixed(3)`
 // only coincidentally matches the quantized value for some coordinates and silently
@@ -25,13 +29,13 @@ describe('worldCacheKey', () => {
   });
 
   it('includes a distinct corridor suffix', () => {
-    const key = worldCacheKey('maplibre', OPENING_RIDE.from, {
-      from: OPENING_RIDE.from,
-      to: OPENING_RIDE.to,
+    const key = worldCacheKey('maplibre', START_LOCATION, {
+      from: START_LOCATION,
+      to: OTHER_POINT,
       padMeters: BUS_CORRIDOR_PAD_METERS,
     });
     expect(key).toContain(':corridor:');
-    expect(key).not.toBe(worldCacheKey('maplibre', OPENING_RIDE.from));
+    expect(key).not.toBe(worldCacheKey('maplibre', START_LOCATION));
   });
 
   it('BUS_CORRIDOR_PAD_METERS matches WORLD_DATA_RADIUS.buildings', () => {

@@ -109,38 +109,6 @@ describe('resolveCameraPlacement', () => {
   });
 });
 
-import { OPENING_CAM_INTRO_DURATION_MS, resolveOpeningIntroPlacement } from '../../src/svartaksi/cameraRig';
-
-describe('resolveOpeningIntroPlacement', () => {
-  it('starts at the selectable top-down placement', () => {
-    const placement = resolveOpeningIntroPlacement(at(0, 0, 0), NORTH, 0)!;
-    const topDown = resolveCameraPlacement('top-down', VEHICLE_RIG, at(0, 0, 0), NORTH, 0);
-    expect(placement.position.distanceTo(topDown.position)).toBeCloseTo(0, 6);
-    expect(placement.lookAt.distanceTo(topDown.lookAt)).toBeCloseTo(0, 6);
-  });
-
-  it('returns null once the intro duration has elapsed', () => {
-    expect(resolveOpeningIntroPlacement(at(0, 0, 0), NORTH, OPENING_CAM_INTRO_DURATION_MS)).toBeNull();
-    expect(resolveOpeningIntroPlacement(at(0, 0, 0), NORTH, OPENING_CAM_INTRO_DURATION_MS + 500)).toBeNull();
-  });
-
-  it('moves slowly and continuously toward the cinematic placement', () => {
-    const early = resolveOpeningIntroPlacement(at(0, 0, 0), NORTH, 1_000)!;
-    const middle = resolveOpeningIntroPlacement(at(0, 0, 0), NORTH, OPENING_CAM_INTRO_DURATION_MS / 2)!;
-    const late = resolveOpeningIntroPlacement(at(0, 0, 0), NORTH, OPENING_CAM_INTRO_DURATION_MS - 1)!;
-    const cinematic = resolveCameraPlacement('cinematic', VEHICLE_RIG, at(0, 0, 0), NORTH, 0);
-    expect(early.position.y).toBeGreaterThan(middle.position.y);
-    expect(middle.position.y).toBeGreaterThan(late.position.y);
-    expect(late.position.distanceTo(cinematic.position)).toBeLessThan(0.01);
-  });
-
-  it('always looks at the bus position, following it rather than the origin', () => {
-    const { lookAt } = resolveOpeningIntroPlacement(at(50, 0, -30), NORTH, 200)!;
-    expect(lookAt.x).toBeCloseTo(50, 6);
-    expect(lookAt.z).toBeCloseTo(-30, 6);
-  });
-});
-
 describe('INTERIOR_RIG', () => {
   it('frames the pill closer than the on-foot rig, to fit inside the bus cabin', () => {
     expect(INTERIOR_RIG.chaseBack).toBeLessThan(FOOT_RIG.chaseBack);

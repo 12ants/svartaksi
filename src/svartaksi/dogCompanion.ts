@@ -16,12 +16,12 @@ import type { LocalPoint } from '../world/types';
 
 /**
  * Where the dog is first placed, relative to START_LOCATION (which is local-origin
- * (0, 0) — see config.ts). 35m east, 10m south: off the opening ride's own road line,
- * close enough that a player who gets off the bus early is likely within sight of it.
- * This point does not need to be tile-verified the way START_LOCATION/CAMP_LOCATION
- * were — svartaksiRuntime.tsx only ever uses it as the *authored* input to
- * bonfireCamp.ts's resolveCampPoint, whose widening safety search resolves it to a real
- * safe point at runtime regardless of how close the guess is.
+ * (0, 0) — see config.ts). 35m east, 10m south: close enough to be within sight of a
+ * player who has just started at the wheel. This point does not need to be
+ * tile-verified the way START_LOCATION/CAMP_LOCATION were — svartaksiRuntime.tsx only
+ * ever uses it as the *authored* input to bonfireCamp.ts's resolveCampPoint, whose
+ * widening safety search resolves it to a real safe point at runtime regardless of how
+ * close the guess is.
  */
 export const DOG_SPAWN_LOCAL: LocalPoint = { x: 35, z: 10 };
 

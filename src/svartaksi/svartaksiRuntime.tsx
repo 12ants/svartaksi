@@ -29,8 +29,8 @@ import type { CameraMode } from './cameraModes';
 import { cameraEaseTau, DEFAULT_CAMERA_SETTINGS, type CameraSettings } from './cameraSettings';
 import { rankNearbyPlaces, type NearbyItem } from './nearbyPlaces';
 import { accumulateFixedSteps } from './fixedTimestep';
-import { OPENING_RIDE, START_LOCATION, START_LOCATION_NAME, WORLD_DATA_RADIUS } from './config';
-import { nextRideCorridorLeg, resolveBusRoute } from './busCorridor';
+import { START_LOCATION, START_LOCATION_NAME, WORLD_DATA_RADIUS } from './config';
+import { nextRideCorridorLeg } from './busCorridor';
 import { nextBlockingSignalStop, type RouteSignalStop } from './trafficLights';
 import { createMapLibreProvider } from '../world/providers/maplibreProvider';
 import { lookupPrecomputedArea } from '../world/providers/areaManifestCache';
@@ -208,8 +208,7 @@ import { isDevModeRequested } from './devMode';
 import { pushLog } from './gameLogger';
 import {
   applyCameraSettings, clampPlacementAboveGround, pullPlacementClearOfObstruction,
-  FOOT_RIG, HORSE_RIG, INTERIOR_RIG, OPENING_CAM_INTRO_DURATION_MS, resolveCameraPlacement,
-  resolveOpeningIntroPlacement, VEHICLE_RIG,
+  FOOT_RIG, HORSE_RIG, INTERIOR_RIG, resolveCameraPlacement, VEHICLE_RIG,
 } from './cameraRig';
 import { createCameraTransformApplier, updateCameraFov } from './runtimeCamera';
 import {
@@ -1118,24 +1117,10 @@ function WorldScene({
   const worldReadyRef = useRef(false);
   const lastBuildProgressAtRef = useRef(0);
   /**
-   * The opening ride runs exactly once per runtime, whatever happens to it: 'pending'
-   * until the first world is on screen, 'running' while the route is being resolved,
-   * 'done' from the moment the player is aboard — or from the moment the attempt fails,
-   * so a network hiccup at startup does not re-trigger it on the next streamed world.
-   */
-  const openingRidePhaseRef = useRef<'pending' | 'running' | 'done'>('pending');
-  const openingCamStartMsRef = useRef<number | null>(null);
-  // Whether the auto-switch into cockpit view at the end of the opening intro has
-  // already fired for the current ride — set back to false each time a new intro
-  // starts (see beginOpeningRide), so it fires exactly once per ride.
-  const introCockpitAppliedRef = useRef(false);
-  const openingRideControllerRef = useRef<AbortController | null>(null);
   /** Handle for the curtain's timer-driven build loop, 0 when it is not scheduled. */
   const curtainPumpTimerRef = useRef(0);
-  /** Returns true if it took ownership of the loading curtain — see its definition. */
-  const beginOpeningRideRef = useRef<(readyStatus: RuntimeStatus) => boolean>(() => false);
   /** Test-only seam (see busRiderDebugBridge.ts): starts a bus ride along a road already
-   * present in the loaded world data, bypassing the opening ride's own corridor fetch
+   * present in the loaded world data, bypassing the route planner's own corridor fetch
    * and long-distance pathfinding. Only reachable through the ?dev=1-gated debug bridge,
    * never from normal play. Returns true if it managed to board. */
   const debugBoardBusRef = useRef<() => boolean>(() => false);
@@ -2235,11 +2220,8 @@ function WorldScene({
       insideBusRef.current = true;
       busDoorOpenRef.current = false;
       // Start the ride in the chase view — the interior-scaled rig (INTERIOR_RIG) that
-      // frames the rider walking the cabin. For the scripted opening ride this is only
-      // the fallback the intro shot eases out of; the frame loop switches to cockpit
-      // automatically once the intro finishes (see introCockpitAppliedRef in useFrame).
-      // Camera mode stays switchable from here on regardless — the player can still
-      // choose any other mode at any time.
+      // frames the rider walking the cabin. Camera mode stays switchable from here on
+      // regardless — the player can still choose any other mode at any time.
       setCamera('chase');
       // The car keeps sitting exactly where it was parked; zero its velocity so it
       // does not coast on for a frame when control comes back.
@@ -2307,62 +2289,6 @@ function WorldScene({
       setHint('PULLING IN…');
     };
 
-    /**
-     * The game opens mid-journey rather than parked: the player boards the westbound
-     * service out of Svartaksi and watches the city arrive through the window.
-     *
-     * The route is resolved here, at mount, rather than when the world is ready — it
-     * runs over its own corridor fetch (busCorridor) and shares nothing with the
-     * streamed world, so making it wait would simply add its latency to the world's
-     * instead of hiding it behind it. By the time the first world is on screen this has
-     * usually already settled.
-     */
-    const openingRideController = new AbortController();
-    openingRideControllerRef.current = openingRideController;
-    const openingRoute = resolveBusRoute(
-      OPENING_RIDE.from,
-      OPENING_RIDE.to,
-      openingRideController.signal,
-    ).catch(() => ({ ok: false as const, reason: 'fetch-failed' as const }));
-
-    /**
-     * Boards the player once the first world is visible. Returns true when it has taken
-     * over the loading curtain, in which case it is also responsible for eventually
-     * publishing `readyStatus` — every exit path publishes it exactly once. A route that
-     * could not be resolved simply leaves the player at the wheel in Svartaksi, which is a
-     * perfectly playable game, so there is no error path to surface.
-     */
-    const beginOpeningRide = (readyStatus: RuntimeStatus): boolean => {
-      if (openingRidePhaseRef.current !== 'pending') return false;
-      if (readyStatus.mode !== 'initial') return false;
-      openingRidePhaseRef.current = 'running';
-
-      callbacksRef.current.onStatus({
-        ...readyStatus,
-        phase: 'loading',
-        progress: 0.97,
-        message: `Boarding the service to ${OPENING_RIDE.destinationName}`,
-      });
-
-      void openingRoute.then((route) => {
-        openingRidePhaseRef.current = 'done';
-        if (disposedRef.current || openingRideController.signal.aborted) return;
-        if (route.ok) {
-          openingCamStartMsRef.current = performance.now();
-          introCockpitAppliedRef.current = false;
-          applyStartBusRide(route.path, route.signalStops);
-        } else {
-          // Silent by design (see beginOpeningRide's docstring) — the player is simply
-          // left at the wheel — but a warning still belongs here so a routing regression
-          // shows up in the console instead of only as "the intro shows the car".
-          console.warn(`[svartaksi bus] opening ride route unavailable: ${route.reason}`);
-        }
-        callbacksRef.current.onStatus(readyStatus);
-      });
-      return true;
-    };
-    beginOpeningRideRef.current = beginOpeningRide;
-
     const captureContext = (): PerformanceCaptureContext => {
       const context = gl.getContext();
       const identity = captureRendererIdentity(context);
@@ -2403,7 +2329,6 @@ function WorldScene({
       generationRef.current += 1;
       activeControllerRef.current?.abort();
       preloadControllerRef.current?.abort();
-      openingRideControllerRef.current?.abort();
       window.clearTimeout(curtainPumpTimerRef.current);
       removeCaptureAfterRender();
       worldDataCache.clear();
@@ -2509,12 +2434,7 @@ function WorldScene({
     if (!building && pending && pending.request === generationRef.current) {
       pendingReadyRef.current = null;
       worldReadyRef.current = true;
-      // The opening ride owns the curtain from here: it keeps the loading screen up
-      // while it plans the route, and publishes `ready` itself once the player is
-      // aboard (or once it has given up). Any other load reports ready immediately.
-      if (!beginOpeningRideRef.current(pending.status)) {
-        callbacksRef.current.onStatus(pending.status);
-      }
+      callbacksRef.current.onStatus(pending.status);
     }
     const input = control.inputPaused ? {
       forward: 0,
@@ -2527,17 +2447,6 @@ function WorldScene({
       jump: false,
       crouch: false,
     } : control.input.snapshot();
-    const introRunning = openingCamStartMsRef.current !== null
-      && performance.now() - openingCamStartMsRef.current < OPENING_CAM_INTRO_DURATION_MS;
-    if (introRunning) {
-      input.forward = 0;
-      input.turn = 0;
-      input.boost = false;
-      input.brake = false;
-      input.lookX = 0;
-      input.lookY = 0;
-      input.vertical = 0;
-    }
 
     const bus = busRef.current;
     const person = personRef.current;
@@ -3683,25 +3592,11 @@ function WorldScene({
       // Where the camera *should* be is a pure question (see cameraRig); all this frame
       // owes is easing toward the answer, so a mode change or a sharp turn arrives as a
       // sweep rather than a cut.
-      const introStart = openingCamStartMsRef.current;
-      const introElapsed = introStart === null ? null : performance.now() - introStart;
-      const introPlacement = introElapsed === null || introElapsed >= OPENING_CAM_INTRO_DURATION_MS
-        ? null
-        : resolveOpeningIntroPlacement(active.position, activeHeading, introElapsed);
-      // Hand off from the scripted intro shot straight into the passenger seat, rather
-      // than leaving the player on whatever mode the ride happened to board in.
-      if (introPlacement === null && introStart !== null && !introCockpitAppliedRef.current) {
-        introCockpitAppliedRef.current = true;
-        setCameraRef.current('cockpit');
-      }
-      // The intro shot owns the camera outright while it runs, so as far as the modes are
-      // concerned it has not been entered yet — which is what keeps orbit's clock (below)
-      // from starting behind the scripted shot and jumping when it hands over.
-      if (control.cameraMode !== lastCameraModeRef.current || introPlacement !== null) {
-        lastCameraModeRef.current = introPlacement === null ? control.cameraMode : null;
+      if (control.cameraMode !== lastCameraModeRef.current) {
+        lastCameraModeRef.current = control.cameraMode;
         cameraModeEnteredMsRef.current = time;
       }
-      const placement = introPlacement ?? resolveCameraPlacement(
+      const placement = resolveCameraPlacement(
         control.cameraMode,
         // The player's dials are a transform on whichever body rig is active, so one
         // "closer" means the same thing on foot as in the car — see applyCameraSettings.
@@ -3710,25 +3605,22 @@ function WorldScene({
         activeHeading,
         time - cameraModeEnteredMsRef.current,
       );
-      // The scripted intro is composed rather than followed, so it is left alone. Every
-      // selectable mode gets both corrections: held off the ground it is flying over, and
-      // pulled in along its own sightline so it is never left standing inside a building
-      // or a tree.
+      // Every selectable mode gets both corrections: held off the ground it is flying
+      // over, and pulled in along its own sightline so it is never left standing inside a
+      // building or a tree.
       //
       // Top-down used to be excluded from the ground clamp on the reasoning that it is
       // far above everything by construction. That holds over open ground and fails
       // anywhere with a tree or a tall building: its boom is a fixed height above the
       // player, so it ends up inside the canopy. It is clamped and pulled in like the
       // rest now.
-      if (introPlacement === null) {
-        clampPlacementAboveGround(placement, groundHeightAt, CAMERA.groundClearance);
-        pullPlacementClearOfObstruction(
-          placement,
-          cameraSightlineHit,
-          CAMERA.groundClearance,
-          CAMERA.minBoomDistance,
-        );
-      }
+      clampPlacementAboveGround(placement, groundHeightAt, CAMERA.groundClearance);
+      pullPlacementClearOfObstruction(
+        placement,
+        cameraSightlineHit,
+        CAMERA.groundClearance,
+        CAMERA.minBoomDistance,
+      );
       const cameraBlend = 1 - Math.exp(-dt / cameraEaseTau(control.camera.responsiveness));
       applyCameraTransform(state.camera, placement.position, placement.lookAt, cameraBlend);
     }

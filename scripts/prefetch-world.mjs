@@ -82,26 +82,22 @@ async function loadProductionModules(offline) {
   }
 }
 
-/** One radial area per TELEPORT_LOCATIONS entry, plus one corridor area for the opening
- * ride — see the design spec's Areas section. This is the full set of regions the game
- * ships tiles for; not all of them get a precomputed WorldData area (see
- * buildPrecomputedAreaSlugs below). */
+/** One radial area per TELEPORT_LOCATIONS entry — see the design spec's Areas section.
+ * This is the full set of regions the game ships tiles for; not all of them get a
+ * precomputed WorldData area (see buildPrecomputedAreaSlugs below).
+ *
+ * There used to also be one corridor area, padded along the scripted opening ride's
+ * route so that ride's own corridor fetch had committed tiles to hit offline. That ride
+ * was removed (the game now opens parked, not mid-journey — see START_LOCATION in
+ * config.ts), so there is no fixed corridor left to pre-pad; a player-planned ride via
+ * BusOverMap fetches its own corridor live, same as it always did for any route other
+ * than the opening one. */
 function buildTileRegionDescriptors({ config }) {
-  const radial = config.TELEPORT_LOCATIONS.map((location) => ({
+  return config.TELEPORT_LOCATIONS.map((location) => ({
     slug: slugify(location.label),
     center: { lng: location.lng, lat: location.lat },
     corridor: undefined,
   }));
-  const corridor = {
-    slug: `${slugify(config.OPENING_RIDE.destinationName)}-corridor`,
-    center: config.OPENING_RIDE.from,
-    corridor: {
-      from: config.OPENING_RIDE.from,
-      to: config.OPENING_RIDE.to,
-      padMeters: config.WORLD_DATA_RADIUS.buildings,
-    },
-  };
-  return [...radial, corridor];
 }
 
 /**
@@ -109,18 +105,18 @@ function buildTileRegionDescriptors({ config }) {
  * match what svartaksiRuntime.tsx's loadWorld actually requests on initial load
  * (worldCacheKey('maplibre', START_LOCATION)).
  *
- * Every TELEPORT_LOCATIONS entry and the opening-ride corridor still get their tiles
- * fetched and committed (see buildTileRegionDescriptors and acquireTiles, keyed by tile
- * coordinate, not by area) because the runtime's local-tile-first hook
- * (vectorTileSource.ts) benefits from any committed tile regardless of area. But
- * svartaksiRuntime.tsx's other loadWorld call sites never request a *precomputed-area* key
- * other than this one: teleporting loads through the same START_LOCATION-anchored path
- * (the origin hazard rule pins every load to START_LOCATION as origin, not as center —
- * this is a separate point), the streaming discs are centered on a camera-ahead predicted
- * point that moves continuously, and the bus corridor legs are centered on a moving
- * lookahead point along the route, never on OPENING_RIDE.from directly. None of those keys
- * are fixed, so no precomputed area for them could ever match via lookupPrecomputedArea —
- * generating them was ~45MB of dead payload per deploy that nothing could ever read back.
+ * Every TELEPORT_LOCATIONS entry still gets its tiles fetched and committed (see
+ * buildTileRegionDescriptors and acquireTiles, keyed by tile coordinate, not by area)
+ * because the runtime's local-tile-first hook (vectorTileSource.ts) benefits from any
+ * committed tile regardless of area. But svartaksiRuntime.tsx's other loadWorld call
+ * sites never request a *precomputed-area* key other than this one: teleporting loads
+ * through the same START_LOCATION-anchored path (the origin hazard rule pins every load
+ * to START_LOCATION as origin, not as center — this is a separate point), the streaming
+ * discs are centered on a camera-ahead predicted point that moves continuously, and any
+ * player-planned bus ride's corridor legs are centered on a moving lookahead point along
+ * its route, never fixed. None of those keys are fixed, so no precomputed area for them
+ * could ever match via lookupPrecomputedArea — generating them was ~45MB of dead payload
+ * per deploy that nothing could ever read back.
  */
 function buildPrecomputedAreaSlugs({ config }) {
   return new Set([slugify(config.START_LOCATION_NAME)]);

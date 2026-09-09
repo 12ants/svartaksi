@@ -1,5 +1,5 @@
 /**
- * Where the world begins, what the opening ride is, and the teleport presets.
+ * Where the world begins and the teleport presets.
  *
  * START_LOCATION is not just a spawn point: it is the *origin* of the local meter
  * coordinate system every other module works in (see `world/geo.ts`). Moving it moves
@@ -10,47 +10,42 @@
  */
 export const START_LOCATION = {
   /**
-   * A roadside spot on Nathorstvägen in Hammarbyhöjden, chosen at random rather than
-   * picked by hand: `--seed=20260905` into a uniform draw over the shipped tile cache,
-   * taking the first point that survived every check below. Recorded so the choice can be
-   * reproduced or re-rolled.
+   * The eastern edge of Gärdet, the open field in Östermalm — chosen so the player
+   * starts parked beside a real paved carriageway rather than out on the field itself.
+   * Named `Gärdet` rather than a specific street below: `WorldRoad` carries no `name`
+   * field (only `kind`), so the nearby carriageway's OSM road name was never checked,
+   * only its kind and distance — Gärdet is the claim that check actually supports.
    *
-   * Every condition was verified against the shipped tiles in `vendor/worldcache`, using
-   * this repo's own decoder, normalizer and predicates rather than asserted:
+   * Verified against live OSM data (tiles.openfreemap.org), using this repo's own
+   * decoder, normalizer and predicates rather than asserted:
    *
    * - not inside any water polygon and not inside any building footprint (the two halves
    *   of `randomSpawn.ts`'s `isSafeSpawnPoint`);
-   * - 19m from a bus-drivable street (`isBusDrivableKind`, the same predicate
-   *   `busRouting.ts` filters on) — far enough not to stand in the carriageway, close
-   *   enough to walk to. Service roads, `*_construction` ways and tunnel segments are
-   *   excluded: a driveway is not a street, and a tunnel has no surface to stand on (an
-   *   earlier candidate sat 30m from Hammarbytunneln, which is underground there);
-   * - the opening ride actually routes. `buildRoadGraph`/`findRoute` return a 5.5km bus
-   *   route to OPENING_RIDE.to against a 3.8km straight line. That test is what rejected a
-   *   candidate on Lidingö, which looked 3.6km away and is an island reachable only by
-   *   bridge through central Stockholm.
+   * - 25m from a bus-drivable street (`isBusDrivableKind`, the same predicate
+   *   `busRouting.ts` filters on, resolving to a `secondary`-tagged carriageway) — far
+   *   enough not to stand in the carriageway, close enough to walk to. Service roads,
+   *   `*_construction` ways and tunnel segments are excluded: a driveway is not a
+   *   street, and a tunnel has no surface to stand on;
+   * - no tunnel segment within 5m of the point.
+   *
+   * The game no longer opens on a scripted bus ride (see the removed OPENING_RIDE, and
+   * `applyStartBusRide` for the general boarding mechanic that survives it), so there is
+   * no route-length check to run here the way the previous Hammarbyhöjden pick had one
+   * against its Ryssbergen destination — the player starts parked in the car.
+   *
+   * One consequence worth flagging rather than silently working around: the story's
+   * bonfire camp (`bonfireCamp.ts`'s CAMP_LOCATION, Ryssbergen in Nacka) is a fixed,
+   * independent lng/lat that does not move with START_LOCATION. It is now about 3.8km
+   * from here by straight line — a real drive rather than the ~970m walk it was placed
+   * for, and the offline snapshot in `vendor/worldcache` still covers only the old
+   * Hammarbyhöjden area, so both this point and the drive to the camp need a live
+   * connection until `pnpm prefetch:world` is re-run for the new area.
    */
-  lng: 18.090103,
-  lat: 59.297155,
+  lng: 18.11314,
+  lat: 59.34281,
 } as const;
 
-export const START_LOCATION_NAME = 'Nathorstvägen';
-
-/**
- * The ride the game opens on: north-east from the Nathorstvägen start to Ryssbergen,
- * ending about 110m from the bonfire camp. The destination is unchanged — only the
- * departure moved, so the story arrives where it always did.
- *
- * The route itself is not stored here. It is resolved at startup from live road data
- * (see `busCorridor.ts`), because a hard-coded polyline would drift out of agreement
- * with the world actually rendered around it the first time the source data changed.
- * These two points and the label are the whole of the fixed part.
- */
-export const OPENING_RIDE = {
-  from: START_LOCATION,
-  to: { lng: 18.149222, lat: 59.313816 },
-  destinationName: 'Ryssbergen South',
-} as const;
+export const START_LOCATION_NAME = 'Gärdet';
 
 /**
  * How far each world-data category is polled from, per WorldDataProvider.load. Roads and
@@ -65,7 +60,9 @@ export const WORLD_DATA_RADIUS = {
 
 export const TELEPORT_LOCATIONS = [
   { label: START_LOCATION_NAME, lng: START_LOCATION.lng, lat: START_LOCATION.lat },
-  { label: OPENING_RIDE.destinationName, lng: OPENING_RIDE.to.lng, lat: OPENING_RIDE.to.lat },
+  // Kept as a teleport preset in its own right after the scripted opening ride that used
+  // to end here was removed — see CAMP_LOCATION in bonfireCamp.ts, ~110m further on.
+  { label: 'Ryssbergen South', lng: 18.149222, lat: 59.313816 },
   { label: 'Sickla', lng: 18.1268, lat: 59.3062 },
   { label: 'Gamla Stan', lng: 18.0717, lat: 59.3257 },
   { label: 'Sergels Torg', lng: 18.0652, lat: 59.3326 },

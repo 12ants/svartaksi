@@ -19,9 +19,13 @@ import type { LngLat, LocalPoint } from '../world/types';
  * put the fire somewhere different every time the tile source changed.
  *
  * Checked against OSM: `landuse=forest`, named, roughly 830 x 520m, and this point is
- * inside its outer ring. It sits ~970m west-north-west of START_LOCATION, which keeps it
- * inside the building draw radius (1100m) rather than out in the terrain-only band where
- * a camp would have no trees drawn around it.
+ * inside its outer ring. This is a fixed lng/lat, independent of START_LOCATION — it was
+ * originally placed ~970m from the game's old Hammarbyhöjden start (inside that start's
+ * building draw radius, so the camp had trees drawn around it from the first frame); it
+ * does not move when START_LOCATION does, and is currently about 3.8km from the Gärdet
+ * start, a drive rather than a walk. World data streams around wherever the player
+ * actually is, so trees still draw in on approach — nothing here depends on proximity to
+ * START_LOCATION specifically.
  */
 export const CAMP_LOCATION: LngLat = { lng: 18.147620, lat: 59.313237 };
 

@@ -184,43 +184,6 @@ export function resolveCameraPlacement(
   }
 }
 
-/** How long the opening establishing shot takes to descend from its overhead view
- * into the bus rig's cinematic flank. The unbroken move is deliberately slow enough
- * to establish the road and surrounding world before bringing the bus into focus. */
-export const OPENING_CAM_INTRO_DURATION_MS = 15_000;
-
-function easeInOut(t: number): number {
-  return t * t * (3 - 2 * t);
-}
-
-/**
- * The scripted opening establishing shot: one continuous, eased move from the vehicle
- * top-down placement to its cinematic placement. Both endpoints use the same public
- * camera rigs as the corresponding selectable modes, so later tuning cannot leave the
- * intro resembling a different pair of shots. Returns null at the end for the runtime's
- * existing handoff into the passenger view.
- *
- * Deliberately built from the *un-adjusted* `VEHICLE_RIG`, not from the player's dials:
- * this is an authored shot with a composition of its own, and a player who had pulled the
- * camera in tight would otherwise open the game on a different film. Every selectable mode
- * goes through `applyCameraSettings`; this one is the documented exception.
- */
-export function resolveOpeningIntroPlacement(
-  busPosition: THREE.Vector3,
-  busHeading: number,
-  elapsedMs: number,
-): CameraPlacement | null {
-  if (elapsedMs >= OPENING_CAM_INTRO_DURATION_MS) return null;
-  const progress = THREE.MathUtils.clamp(elapsedMs / OPENING_CAM_INTRO_DURATION_MS, 0, 1);
-  const amount = easeInOut(progress);
-  const topDown = resolveCameraPlacement('top-down', VEHICLE_RIG, busPosition, busHeading, 0);
-  const cinematic = resolveCameraPlacement('cinematic', VEHICLE_RIG, busPosition, busHeading, 0);
-  return {
-    position: topDown.position.lerp(cinematic.position, amount),
-    lookAt: topDown.lookAt.lerp(cinematic.lookAt, amount),
-  };
-}
-
 /**
  * Elevation the follow booms are held between.
  *
