@@ -146,16 +146,29 @@ hanging, and not one standing inside a water polygon. The limitation is latent, 
 0.6m nominal embed is what most of that spread is. Worth fixing when a bridge over open
 water is actually reachable; not the cause of anything visible now.
 
-**Road vanishing at a bridge, and z-fighting.** Both have now been measured, over 831
-roads within 900m of the origin, and neither reproduces.
+**Road vanishing at a bridge, and z-fighting.** Both were investigated over 831 roads
+within 900m of the origin. Neither reproduces *in the specific mechanisms checked below* —
+which is narrower than "neither exists", and the difference is stated rather than glossed.
 
 *Vanishing road.* `surfaceVisibility` hides exactly one thing: a `tunnel`. 50 roads in the
 sample are hidden, all 50 of them tunnel-tagged, and only 4 of those lie within 25m of any
-bridge. There is no mechanism left by which a bridge removes a road from the scene — the
-negative-`layer` underpass case that used to do it was already fixed on 2026-09-09.
+bridge. So the visibility gate is not removing roads at bridges: the negative-`layer` underpass
+case that used to do it was already fixed on 2026-09-09.
 
-*Z-fighting.* Of 268 crossings carrying grade-separation evidence, 58 involve two visible
-roads. 30 of those 58 resolve to within 5cm of each other, which sounds alarming and is
+That clears `surfaceVisibility` specifically, not every way a road can fail to appear. Two
+other drop paths were *not* examined. `threeWorld.ts` discards any road whose ribbon comes
+out with an empty index (`if (!geometry.index || geometry.index.count === 0)`) before it
+reaches a draw bucket, and nothing counts how often that fires. `isRenderedWay`
+(`svartaksi/roadStyle.ts`) is a separate inclusion gate that this module's own header notes
+it "no longer shares a decision with". Either could drop a road without a bridge being
+involved at all; neither has been measured.
+
+*Z-fighting.* What was measured is one pair specifically: **road carriageway against road
+carriageway, at grade-separated crossings**. The reported symptom also named railings and
+the road beneath a deck, so note what this does not cover — railing against deck, and deck
+slab against the terrain plane, were both left unmeasured and remain open.
+
+Of 268 crossings carrying grade-separation evidence, 58 involve two visible roads. 30 of those 58 resolve to within 5cm of each other, which sounds alarming and is
 not: **all 30 are crossings of two roads of the same class**, which is precisely the case
 `roadRenderOrder` already resolves by pinning each road to its own draw slot, making the
 winner camera-independent. Two different classes are separated by `ROAD_CLASS_STEP` by
