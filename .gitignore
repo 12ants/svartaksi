@@ -6,6 +6,7 @@ test-results/
 .vercel
 dist/
 .worktrees/
+.claude/worktrees/
 .claude/settings.local.json
 .wrangler/
 vendor/worldcache/areas/
