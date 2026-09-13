@@ -62,6 +62,7 @@ import {
   buildRoadElevationProfilesJob,
   BRIDGE_DECK_THICKNESS,
   isElevatedRoadProfile,
+  roadElevationAtPoint,
   ROAD_DECK_LIFT,
   sampleRoadElevation,
   type RoadElevationProfile,
@@ -2182,6 +2183,29 @@ export function createThreeWorld(scene: THREE.Scene): ThreeWorld {
         terrainIndex: terrainIndex(),
       });
       staging.roadElevationProfiles = roadElevationProfiles;
+      /**
+       * One road's own surface height at a point — what `createRoadObstructionTest` needs
+       * to tell a street passing under a viaduct from the viaduct's own continuation way.
+       *
+       * A road carrying a profile is asked for its real, possibly lifted, surface; one
+       * without a profile is at grade by definition, and its surface elevation is the
+       * whole answer. The single-entry map is what confines the profile lookup to *this*
+       * road rather than to whatever else covers the point — a deck and the street beneath
+       * it both cover it, and taking the higher of the two would report every underpass as
+       * being at deck level. Cached per road because this is asked once per support and a
+       * viaduct has many.
+       */
+      const singleProfileMaps = new Map<string, Map<string, RoadElevationProfile>>();
+      const roadSurfaceHeightAt = (road: WorldRoad, x: number, z: number): number => {
+        const ownProfile = roadElevationProfiles.get(road.id);
+        if (!ownProfile) return roadSurfaceElevation(road);
+        let single = singleProfileMaps.get(road.id);
+        if (!single) {
+          single = new Map([[road.id, ownProfile]]);
+          singleProfileMaps.set(road.id, single);
+        }
+        return roadElevationAtPoint(x, z, single) ?? roadSurfaceElevation(road);
+      };
       // One mesh per RoadStyleKey (typically 4-6) instead of one per road (thousands) —
       // roads already share a material per style key (getOrCreateRoadMaterial), so the
       // per-road mesh was the only thing forcing a separate draw call per road. See
@@ -2259,7 +2283,11 @@ export function createThreeWorld(scene: THREE.Scene): ThreeWorld {
           if (nearEnoughForDetail) {
             const supports = pierPlacements(
               samples.points, samples.elevations, samples.lifts, thickness, road.width,
-              { isObstructed: createRoadObstructionTest(nearbyRoads, road.id, samples.points) },
+              {
+                isObstructed: createRoadObstructionTest(
+                  nearbyRoads, road.id, samples.points, roadSurfaceHeightAt,
+                ),
+              },
             );
             const pier = buildBridgePierGeometry(supports);
             if (pier) piers.push(pier);

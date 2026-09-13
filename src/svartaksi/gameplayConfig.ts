@@ -116,6 +116,39 @@ export const CAMERA = {
    * wedged into a corner clips a little instead of collapsing.
    */
   minBoomDistance: 1.2,
+  /**
+   * How far into the future the follow camera leads a turn, in seconds — see
+   * cameraLookAhead.ts.
+   *
+   * This is the one number the whole lead is built on: the aim is displaced to wherever
+   * the body's present cornering would carry it in this long. Six tenths of a second is
+   * about a driver's own glance ahead through a bend; much less and the lead is
+   * imperceptible, much more and the aim arrives at the corner before the car commits to
+   * it and has to swing back when it does not.
+   */
+  lookAheadTime: 0.6,
+  /**
+   * Ceiling on that lead, in metres. Reached only by a manoeuvre no road car performs —
+   * a hard turn at motorway speed, or the boost key — and there purely so the aim cannot
+   * leave the body it is meant to be framing. At the shipped gain, ordinary town
+   * cornering produces well under a metre of it.
+   */
+  lookAheadMaxLateral: 3.5,
+  /**
+   * Fastest yaw rate the lead will believe, in rad/s — a little over a full revolution
+   * every three seconds, which is quicker than any of this game's bodies can actually
+   * turn. Its job is not tuning but sanity: a teleport, a body swap or a wrap through
+   * +/-pi hands the tracker a heading discontinuity whose raw derivative is enormous, and
+   * without this ceiling one bad frame would fling the aim to the cap.
+   */
+  lookAheadMaxTurnRate: 2.2,
+  /**
+   * Time constant for smoothing the measured yaw rate, in seconds. The raw
+   * frame-to-frame derivative of a heading is noisy — kerbs, suspension and the solver
+   * all shake it — and an aim driven straight off it jitters. Short enough that the lead
+   * still arrives with the turn rather than after it.
+   */
+  lookAheadSmoothingTau: 0.18,
 } as const;
 
 /** Fixed-tick simulation timing and physics thresholds. */

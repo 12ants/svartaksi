@@ -210,6 +210,9 @@ import {
   applyCameraSettings, clampPlacementAboveGround, pullPlacementClearOfObstruction,
   FOOT_RIG, HORSE_RIG, INTERIOR_RIG, resolveCameraPlacement, VEHICLE_RIG,
 } from './cameraRig';
+import {
+  applyCameraLookAhead, createHeadingRateTracker, modeTakesLookAhead,
+} from './cameraLookAhead';
 import { createCameraTransformApplier, updateCameraFov } from './runtimeCamera';
 import {
   createPlayerInputController,
@@ -976,6 +979,10 @@ function WorldScene({
    * growing a second one. */
   const cameraModeEnteredMsRef = useRef(0);
   const lastCameraModeRef = useRef<CameraMode | null>(null);
+  /** Measures how fast whichever body the camera is following is turning, so the shot can
+   * lead the corner — see cameraLookAhead.ts. One per mounted runtime, fed the same
+   * heading the rig is placed from. */
+  const headingRateRef = useRef(createHeadingRateTracker());
   /**
    * The one answer to "what is the surface here": the physics ground callback once the
    * world has built one — terrain plus every road deck, which is what a vehicle is
@@ -3539,7 +3546,7 @@ function WorldScene({
       // mode, and paying the cap here made the look rate silently frame-rate dependent:
       // below 20fps every frame is clamped to 50ms of turn however long it really took,
       // so on a slow machine holding a look key for six seconds turned the view a small
-      // fraction of the radians per second FREECAM.lookSpeed promises. (docs/TODO.md
+      // fraction of the radians per second FREECAM.lookSpeed promises. (An earlier guess
       // blamed the yaw/pitch refs being re-seeded every frame; they are not — the seed is
       // guarded by freecamSeedPendingRef and runs once per entry into the mode.)
       // Still bounded, because a multi-second stall should not spin the view: the bound
@@ -3621,6 +3628,26 @@ function WorldScene({
         CAMERA.groundClearance,
         CAMERA.minBoomDistance,
       );
+      // Lead the corner, last of all. The yaw rate is measured every frame this branch
+      // runs — freecam and the bus seat return above, so a spell in either leaves the
+      // tracker holding a stale heading, which its own clamp and smoothing absorb over
+      // the frame or two after it resumes.
+      //
+      // After the two corrections above rather than before them on purpose: both reason
+      // about the line between the camera and the body it is framing, and a led aim is
+      // no longer on that line. Correcting against the body's true position and then
+      // leading means the lead can never talk the camera into or out of a wall — it is
+      // an aim adjustment and nothing else.
+      const turnRate = headingRateRef.current.update(activeHeading, dt);
+      if (modeTakesLookAhead(control.cameraMode)) {
+        applyCameraLookAhead(
+          placement,
+          activeHeading,
+          turnRate,
+          currentlyRiding ? busSpeedRef.current : Math.abs(velocityRef.current),
+          control.camera.lookAhead,
+        );
+      }
       const cameraBlend = 1 - Math.exp(-dt / cameraEaseTau(control.camera.responsiveness));
       applyCameraTransform(state.camera, placement.position, placement.lookAt, cameraBlend);
     }

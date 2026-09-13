@@ -4,8 +4,8 @@
  *
  * `carryDrivenBody` (see svartaksiRuntime.tsx) exists for bodies whose *pose is computed
  * elsewhere* — a route, a walk controller — and only overwrites a physics body's pose so
- * props feel its momentum; it is explicitly flagged in docs/TODO.md as a kinematic-body
- * workaround against engine internals. The horse is the opposite shape of problem: its
+ * props feel its momentum; it is a known kinematic-body workaround that reaches around
+ * the solver rather than through it. The horse is the opposite shape of problem: its
  * pose *is* the state driven directly by player input (gait selection + turn), stepped
  * forward here in plain math, with the ground read back from `terrainHeightAt` every
  * step so it neither hovers above nor sinks into sloped terrain. Nothing here touches a

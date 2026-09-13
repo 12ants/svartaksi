@@ -28,9 +28,9 @@ describe('normalizeCameraSettings', () => {
   });
 
   it('clamps to the bounds the sliders offer, so stored data can never exceed them', () => {
-    const high = normalizeCameraSettings({ distance: 99, pitch: 900, responsiveness: 4, fov: 179 });
-    const low = normalizeCameraSettings({ distance: -3, pitch: -900, responsiveness: -1, fov: 1 });
-    for (const key of ['distance', 'pitch', 'responsiveness', 'fov'] as const) {
+    const high = normalizeCameraSettings({ distance: 99, pitch: 900, responsiveness: 4, fov: 179, lookAhead: 9 });
+    const low = normalizeCameraSettings({ distance: -3, pitch: -900, responsiveness: -1, fov: 1, lookAhead: -2 });
+    for (const key of ['distance', 'pitch', 'responsiveness', 'fov', 'lookAhead'] as const) {
       expect(high[key]).toBe(CAMERA_SETTING_BOUNDS[key].max);
       expect(low[key]).toBe(CAMERA_SETTING_BOUNDS[key].min);
     }
@@ -41,7 +41,7 @@ describe('isDefaultCameraSettings', () => {
   it('recognises an untouched set, and any single dial moved off it', () => {
     expect(isDefaultCameraSettings(DEFAULT_CAMERA_SETTINGS)).toBe(true);
     expect(isDefaultCameraSettings({ ...DEFAULT_CAMERA_SETTINGS })).toBe(true);
-    for (const key of ['distance', 'pitch', 'responsiveness', 'fov'] as const) {
+    for (const key of ['distance', 'pitch', 'responsiveness', 'fov', 'lookAhead'] as const) {
       expect(isDefaultCameraSettings(settings({ [key]: DEFAULT_CAMERA_SETTINGS[key] + 1 }))).toBe(false);
     }
   });

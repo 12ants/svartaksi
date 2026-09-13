@@ -454,8 +454,8 @@ export const WATER_SURFACE_EPSILON = 0.02;
  *
  * Before this, water polygons sat at a hard-coded y regardless of the terrain underneath
  * them, so a pond that happened to fall inside or beside a landuse mound either floated
- * over its bank or was buried under it (see docs/TODO.md's "Water polygons are not cut
- * into the terrain"), and re-streaming a chunk with a different `terrainIndex` snapshot
+ * over its bank or was buried under it — water polygons are not cut into the terrain —
+ * and re-streaming a chunk with a different `terrainIndex` snapshot
  * could shift the water plane relative to its own shoreline. Sampling the *ring's own
  * vertices* (not just its centroid) and taking the tallest ground under any of them means
  * the water surface always clears the terrain it borders, however that terrain is

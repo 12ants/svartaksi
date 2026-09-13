@@ -41,6 +41,32 @@ endpoints well outside the deck's box while the segment between them runs straig
 it — a vertex test drops precisely the underpass it exists to find. The first draft had
 this bug and a test caught it.
 
+**Correction, 2026-09-13 — the obstruction test was rejecting three supports in four.**
+
+As first written, `createRoadObstructionTest` was a purely horizontal question: is this
+point inside any other road's carriageway. It never asked how high that road was, so a
+road at the deck's *own* level counted as something to keep out of.
+
+That is the usual case rather than a corner one. A viaduct's OSM way is one of several
+carrying the same structure, and the neighbouring ways run directly along the deck's line;
+an abutment, by construction, stands exactly where the deck hands over to the approach
+ramp, and that ramp is at deck level right there. Measured over the committed Gärdet
+cache: of 184 rejected supports, 147 were rejected by a road whose surface sat 0.45m
+*above* the deck underside — one deck-thickness up, which is the deck's own top face.
+Genuine underpasses clustered separately around 4.5m below, with an almost empty gap
+between the two groups. 168 of the 184 were abutments.
+
+The visible result was the failure this module exists to prevent: 68 of 94 elevated roads
+near the origin got no support at all, so their decks read as decals after all — the
+footnote below that "nor has any of it been seen" is where that hid.
+
+The test now takes the deck's underside height and each candidate road's own surface
+height, and rejects a support only where the road genuinely passes beneath it (see
+`MIN_UNDERPASS_DROP`). The horizontal test runs first and the height is looked up only for
+a candidate that already fails it, so the common case costs what it did before. After the
+change the same measurement gives 215 supports instead of 69, one road without support
+instead of 68, and the 20 rejections that were real underpasses are preserved exactly.
+
 **No colliders.** These are visual supports. Making them solid without first proving no bus
 route threads between them could wall a road off from a routing graph that still believes
 it is open.
