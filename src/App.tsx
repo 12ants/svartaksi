@@ -30,7 +30,7 @@ import { START_LOCATION } from './svartaksi/config';
 import { lngLatToLocal } from './world/geo';
 import { WorldInspectorPanel } from './components/WorldInspectorPanel';
 import { WorldLoading } from './components/WorldLoading';
-import { useHudVisibility } from './hooks/useHudVisibility';
+import { useHudVisibility, type HudVisibility } from './hooks/useHudVisibility';
 import { useOverlayController } from './hooks/useOverlayController';
 import { useFullscreen } from './hooks/useFullscreen';
 import { HudActions } from './components/HudActions';
@@ -292,6 +292,19 @@ export default function App() {
   }, []);
   const riding = mode === 'bus';
   const { visibility, setRegion, toggleAll } = useHudVisibility();
+  /** True while the opening cinematic is playing. See `hud` below for what it does. */
+  const [introPlaying, setIntroPlaying] = useState(false);
+  /**
+   * What the HUD actually shows this frame.
+   *
+   * A cutscene is not a moment for a speedometer, an action bar or a control hint — the
+   * chrome would give the game away as a game at the one point it is trying not to be one.
+   * This *masks* the player's own HUD preferences for the duration rather than overwriting
+   * them, so whatever they had turned on is still turned on when control arrives.
+   */
+  const hud: HudVisibility = introPlaying
+    ? { status: false, actions: false, context: false, controls: false }
+    : visibility;
   const { isFullscreen, supported: fullscreenSupported, toggleFullscreen } = useFullscreen();
   const releaseInput = useCallback(() => {
     runtimeRef.current?.releaseInputSource('keyboard');
@@ -336,6 +349,7 @@ export default function App() {
         setSpeech(line === null ? null : { text: line, id: speechSeqRef.current });
       },
       onInspection: setInspectionHit,
+      onIntro: setIntroPlaying,
     });
     runtimeRef.current = runtime;
     performanceBridge?.setRuntime(runtime);
@@ -564,10 +578,10 @@ export default function App() {
         onPointerCancel={() => runtimeRef.current?.releaseBlobPointer()}
         onLostPointerCapture={() => runtimeRef.current?.releaseBlobPointer()}
       />
-      {visibility.status ? <HudReadout speed={speed} fps={fps} status={status} /> : null}
+      {hud.status ? <HudReadout speed={speed} fps={fps} status={status} /> : null}
       <div className="sr-only" aria-live="polite">{status.message}</div>
       <WorldLoading status={status} onRetry={() => runtimeRef.current?.retryWorldLoad()} />
-      {visibility.actions ? (
+      {hud.actions ? (
         <HudActions
           inspectorEnabled={inspectorEnabled}
           onWorld={(trigger) => openOverlay('world', trigger)}
@@ -587,6 +601,10 @@ export default function App() {
         />
       ) : null}
 
+      {/* The one piece of chrome that is not merely masked but removed: it is the control
+          for unmasking the rest, and offering it mid-cutscene invites the player to undo
+          the framing. It comes back with everything else. */}
+      {introPlaying ? null : (
       <button
         type="button"
         className="hud-restore"
@@ -597,12 +615,13 @@ export default function App() {
       >
         HUD
       </button>
+      )}
 
-      <div className={visibility.context && hint ? 'action-hint' : 'sr-only'} aria-live="polite">
+      <div className={hud.context && hint ? 'action-hint' : 'sr-only'} aria-live="polite">
         {hint ?? ''}
       </div>
 
-      {visibility.controls ? <div className="control-hint">
+      {hud.controls ? <div className="control-hint">
         {riding ? (
           <><kbd>WASD</kbd><span>WALK</span><kbd>B</kbd><span>GET OFF</span><kbd>C</kbd><span>CAMERA · {CAMERA_LABELS[cameraMode].toUpperCase()}</span></>
         ) : (
@@ -630,7 +649,7 @@ export default function App() {
         <kbd>Z</kbd><span>HIDE HUD</span>
       </div> : null}
 
-      {visibility.context && (
+      {hud.context && (
         <>
           <HudAnnounce area={area} nearby={showNearby ? nearby : []} />
           <HudSpeech speech={speech} />
@@ -654,7 +673,7 @@ export default function App() {
         onSend={handleSendPreset}
       />
 
-      {visibility.status ? (
+      {hud.status ? (
         <TimeOfDayBar
           hours={timeOfDay}
           auto={settings.autoTimeOfDay}
@@ -919,7 +938,7 @@ export default function App() {
         </Suspense>
       )}
 
-      {visibility.context && inspectorEnabled && (
+      {hud.context && inspectorEnabled && (
         <WorldInspectorPanel
           hit={inspectionHit}
           touchMode={typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches}
@@ -959,7 +978,7 @@ export default function App() {
         />
       ) : null}
 
-      {visibility.controls ? (
+      {hud.controls ? (
         <TouchControls
           mode={mode}
           cameraMode={cameraMode}

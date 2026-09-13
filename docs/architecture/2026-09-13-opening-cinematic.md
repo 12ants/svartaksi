@@ -87,8 +87,9 @@ be rigid through. Scene 2 is the only shot that moves, and it carries its own ea
 ### The handoff hides inside scene 3
 
 Scene 3 frames almost nothing but bodywork, so the world can be replaced underneath it
-without the player seeing the change. `finishIntro` adopts the real world *while the bolted
-camera is still holding*, and only then returns the camera.
+without the player seeing the change. `swapToRealWorld` adopts the real world *while the
+bolted camera is still holding*, and `releaseIntroCamera` only returns the camera once the
+rebuild that adopt started has drained.
 
 Two things make this safe:
 
@@ -103,10 +104,44 @@ Two things make this safe:
   authored stage as a huge journey — and each fetch bumps the load generation the pending
   ready status is keyed to.
 
-Scene 3 **holds** until the real world has arrived. The bolted shot is the same frame
-whether it runs for eight seconds or twenty, which is precisely why the handoff was put
-inside it; `introStage`'s road carries a long run-out so the bus is not braking to a stop
-while it waits.
+### The handoff is two steps, because "arrived" is not "built"
+
+There are **two** gates, not one, and collapsing them is the mistake this section exists to
+prevent.
+
+`adoptWorldData` ends in `world.replace(data, { incremental: true })`, so the real world
+assembles over many frames. The first build is covered by `pumpBehindCurtain`; this one has
+no curtain. Returning the camera in the same breath as the adopt would have the player
+watch a city materialize around them — precisely the artefact the wheel shot was chosen to
+hide.
+
+So:
+
+- `introHoldsWorldRef` — "the intro owns the world". Dropped at the **swap**, when the data
+  has arrived: adopt it, restore the clock, re-ground the parked car, put the bus on the
+  arrival ride. Streaming resumes here, because the bus is on a real road now.
+- `introHoldsCameraRef` — "the intro owns the camera". Dropped at the **release**, once
+  `world.pump` reports the rebuild has drained: only then `setCamera('cockpit')` and
+  `inputPaused = false`.
+
+The camera branch, the FOV guard and the cinematic's clock all key off the camera gate.
+While it is up the build runs at `CURTAIN_BUILD_BUDGET_MS` rather than
+`WORLD_BUILD_BUDGET_MS` — input is paused and the shot is bolted, so there is no gameplay
+to keep smooth and the hold should be as short as possible.
+
+Scene 3 therefore **holds** for as long as both steps need. The bolted shot is the same
+frame whether it runs for eight seconds or twenty, which is precisely why the handoff was
+put inside it; `introStage`'s road carries a long run-out so the bus is not braking to a
+stop while it waits.
+
+### Re-grounding the car is part of the swap
+
+Avoiding `applyTeleport` meant also losing the two things it does that matter here:
+`car.position.y = groundHeightAt(...)` and `syncCarBodyFromGroup`. The taxi sits at
+START_LOCATION for the whole cinematic on the intro stage's terrain — which has no polygons
+anywhere near the origin — so the real relief arrives at a different height beneath it.
+Both lines are done explicitly at the swap. Without them the player alights beside a car
+that is buried or hanging in the air.
 
 The handoff does **not** use `applyTeleport`. That is guarded by `canRelocateWorld`, true
 only while the bus phase is `'hidden'` — mid-ride it silently does nothing, and the handoff
@@ -139,7 +174,37 @@ the doors open and the player alights next to their car — where ordinary play 
   the right and exits to the left", "the wheel to the right in the frame", the head and
   tail padding — are checked by projecting to NDC rather than eyeballed.
 - The intro branch is the camera's first branch and bypasses the rig path, look-ahead and
-  FOV slider. Every existing camera test is untouched and still covers the player's modes.
+  FOV slider. It is entered on the camera gate alone: scene 1 is locked off and ignores the
+  bus, so it plays before `loadBusShell` resolves rather than falling through to the
+  player's rig and easing a chase shot into the opening. Every existing camera test is
+  untouched and still covers the player's modes.
+- The HUD is masked for the duration, via a new `onIntro` callback. A speedometer and an
+  action bar over a cutscene give the game away as a game at the one moment it is trying not
+  to be one. App.tsx *masks* rather than overwrites `useHudVisibility`, so whatever the
+  player had turned on is still on when control arrives.
+
+## Verification
+
+`tests/svartaksi/introStage.test.ts` (9), `introSequence.test.ts` (19),
+`introArrival.test.ts` (7), plus one added to `svartaksiRuntime.test.ts` — 36 in total.
+
+The framing claims in the brief are checked by projecting to normalized device coordinates
+rather than eyeballed: the bus's screen x decreases monotonically through scene 1 from
+positive to negative (*enters from the right and exits to the left*), it is fully off camera
+at both ends of the shot at 16:9 **and** 21:9 (*time padding at the beginning and end*), and
+the front wheel projects right of centre and inside the frame (*a bus wheel to the right in
+the frame*). The bolted rig is shown to frame the wheel identically at two unrelated bus
+poses, which is the property the hidden world swap depends on.
+
+The rest is measured rather than asserted: the authored road reports no infeasible corners,
+the bus holds road speed through scene 1 and is still at road speed with >100m of road left
+when scene 3 ends, and `sceneLighting(INTRO_HOUR).nightFactor > 0.35` — without which
+`setBusNightFactor` leaves the headlights dark and "strong headlights" is just a wish.
+
+**Not verified.** How any of it *looks*. This project has no browser-automation layer by
+design, so the cut inside the wheel shot, the absence of a camera pop at each transition,
+and whether scene 2 reads as "snaking" are all unplaytested. The four manual checks are
+listed in the GDD's acceptance criteria and remain unticked.
 
 ## Alternatives rejected
 

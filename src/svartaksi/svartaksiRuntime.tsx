@@ -350,6 +350,15 @@ interface RuntimeOptions {
    * HUD can treat each one as something new to announce. */
   onArea: (area: string) => void;
   onNearby: (items: NearbyItem[]) => void;
+  /**
+   * Fired true when the opening cinematic starts and false when it gives the camera back.
+   *
+   * The HUD is the reason this crosses the boundary at all: a speedometer and an action bar
+   * over a cutscene give the game away as a game at the one moment it is trying not to be
+   * one. App.tsx masks its chrome on this rather than the runtime reaching into the HUD, and
+   * masks rather than overwrites, so the player's own HUD preferences survive the intro.
+   */
+  onIntro: (playing: boolean) => void;
   /** Fired on every change of what the player currently is. The runtime decides
    * some of these on its own from inside useFrame (a bus reaching the end of its
    * path sets the player down), so App.tsx cannot infer the mode from its own
@@ -523,6 +532,13 @@ const BUS_BODY_TAU = 0.5;
  * wired into everything 'foot' does. 'horse' is a genuine vehicle mode alongside 'car'
  * (see horseBody.ts): mounted/dismounted by proximity through the same E key. */
 export type PlayerMode = 'car' | 'bus' | 'foot' | 'blob' | 'horse';
+
+/**
+ * The pose the cinematic's bus-independent shots are resolved against before the bus model
+ * has finished loading. Scene 1 is locked off and ignores it entirely; it exists so that
+ * shot can play on the first frame rather than waiting for a GLB it does not use.
+ */
+const INTRO_PLACEHOLDER_POSE = { position: new THREE.Vector3(), heading: 0 };
 
 /** Flat background/fog color at a neutral time of day — immediately overwritten by
  * applyTimeOfDay(DEFAULT_TIME_OF_DAY) once the scene is ready, same as before. */
@@ -755,7 +771,7 @@ function WorldScene({
   setShadowsEnabled,
 }: {
   control: RuntimeControl;
-  callbacks: Pick<RuntimeOptions, 'onStatus' | 'onSpeed' | 'onFps' | 'onArea' | 'onNearby' | 'onMode' | 'onCameraMode' | 'onHint' | 'onSpeech' | 'onInspection'>;
+  callbacks: Pick<RuntimeOptions, 'onStatus' | 'onSpeed' | 'onFps' | 'onArea' | 'onNearby' | 'onMode' | 'onCameraMode' | 'onHint' | 'onSpeech' | 'onInspection' | 'onIntro'>;
   onReady: (api: SceneApi) => void;
   setShadowsEnabled: (enabled: boolean) => void;
 }) {
@@ -989,6 +1005,16 @@ function WorldScene({
    * only reader and a re-render per frame would be absurd.
    */
   const introHoldsWorldRef = useRef(false);
+  /**
+   * Whether the cinematic still owns the camera.
+   *
+   * Deliberately a *second* gate rather than a reading of the first. The two end at
+   * different moments: the world is swapped while the wheel shot is still holding, and the
+   * camera is not given back until the city that swap started has finished assembling.
+   * Collapsing them is what would let the player watch a city build up around them — the
+   * exact artefact scene 3 exists to hide.
+   */
+  const introHoldsCameraRef = useRef(false);
   const introPendingWorldRef = useRef<WorldData | null>(null);
   const introFailedRef = useRef(false);
   /** Seconds since the first cinematic frame. Its own clock, not the world's: the intro
@@ -1000,6 +1026,7 @@ function WorldScene({
    * uses, and for the same reason: the frame loop decides when, the mount effect owns the
    * scene objects it needs. */
   const introHandoffRef = useRef<() => void>(() => {});
+  const introReleaseRef = useRef<() => void>(() => {});
   /** Set by the skip listener startIntro installs. Honoured on the next frame rather than
    * acted on from the event, so the handoff always runs in one place. */
   const introSkipRequestedRef = useRef(false);
@@ -2332,7 +2359,9 @@ function WorldScene({
 
     const startIntro = () => {
       introHoldsWorldRef.current = true;
+      introHoldsCameraRef.current = true;
       introElapsedRef.current = 0;
+      callbacksRef.current.onIntro(true);
       applyTimeOfDay(INTRO_HOUR);
       adoptWorldData(buildIntroStage());
       applyStartBusRide(INTRO_ROAD_PATH, [], INTRO_START_SPEED);
@@ -2372,17 +2401,26 @@ function WorldScene({
      * which is only true while the bus phase is 'hidden' — mid-ride it silently does
      * nothing, and the handoff would appear to work while leaving the bus in the woods.
      */
-    const finishIntro = () => {
+    const swapToRealWorld = () => {
       if (introHandedOverRef.current) return;
       introHandedOverRef.current = true;
       stopListeningForIntroSkip();
       const data = introPendingWorldRef.current;
       introPendingWorldRef.current = null;
+      // Only the world gate drops here. The camera stays on the wheel until the city this
+      // adopt kicks off has actually finished building — see releaseIntroCamera.
       introHoldsWorldRef.current = false;
-      controlRef.current.inputPaused = false;
 
       if (data) {
         adoptWorldData(data);
+        // Re-ground the parked taxi. It has been sitting at START_LOCATION for the whole
+        // cinematic on the intro stage's terrain, which has no polygons anywhere near the
+        // origin — so the real relief arriving now is at a different height under it. This
+        // is the pair of lines applyTeleport does for the same reason, and skipping them
+        // leaves the player alighting beside a car that is buried or hanging in the air.
+        car.position.y = groundHeightAt(car.position.x, car.position.z);
+        const carVehicle = carVehicleRef.current;
+        if (carVehicle) syncCarBodyFromGroup(carVehicle, car);
         // Back to the world's own clock. The intro's dusk is set dressing for one scene,
         // not a change to what time it is in the game.
         applyTimeOfDay(controlRef.current.timeOfDay);
@@ -2419,14 +2457,29 @@ function WorldScene({
         setHint(null);
         setMode('car');
       }
-      // Last of all: give the camera back. Cockpit is the seat the ride is meant to be
-      // watched from, and it is a rigid mount like the one we are leaving, so the change of
-      // shot does not also change how the camera behaves.
+    };
+
+    /**
+     * The other half of the handoff: give the camera and the controls back.
+     *
+     * Runs a good while after swapToRealWorld — only once the incremental rebuild it
+     * started has drained. Until then the bolted rig keeps holding on the bodywork, which
+     * is the one shot in the game where a city assembling in the background is invisible.
+     *
+     * Cockpit, because it is the seat the ride is meant to be watched from and because it
+     * is a rigid mount like the one being left, so the change of shot is not also a change
+     * in how the camera behaves.
+     */
+    const releaseIntroCamera = () => {
+      introHoldsCameraRef.current = false;
+      controlRef.current.inputPaused = false;
       setCamera('cockpit');
+      callbacksRef.current.onIntro(false);
     };
 
     introStartRef.current = startIntro;
-    introHandoffRef.current = finishIntro;
+    introHandoffRef.current = swapToRealWorld;
+    introReleaseRef.current = releaseIntroCamera;
 
     // Assigned here rather than at the bridge's install site because applyTeleport is
     // declared further down this effect; the ref is the same indirection debugBoardBus
@@ -2616,7 +2669,12 @@ function WorldScene({
     const behindCurtain = !!pending && pending.status.mode === 'initial';
     // Behind the curtain the timer loop is doing the real work (see
     // CURTAIN_BUILD_BUDGET_MS); this frame only needs to observe where it got to.
-    const building = behindCurtain ? world.isBuilding() : world.pump(WORLD_BUILD_BUDGET_MS);
+    // While the cinematic still holds the camera there is no gameplay to keep smooth —
+    // input is paused and the shot is bolted to the bus — so the city assembling behind the
+    // wheel gets the curtain's budget rather than the frame's. That build is what scene 3
+    // is waiting on, and the road's run-out is finite.
+    const buildBudget = introHoldsCameraRef.current ? CURTAIN_BUILD_BUDGET_MS : WORLD_BUILD_BUDGET_MS;
+    const building = behindCurtain ? world.isBuilding() : world.pump(buildBudget);
 
     // Held back until the world it describes is actually on screen, which under an
     // incremental rebuild is several frames after the data arrived.
@@ -3337,26 +3395,32 @@ function WorldScene({
       });
     }
 
-    if (introHoldsWorldRef.current) {
+    if (introHoldsCameraRef.current) {
       // The cinematic's own clock. Advanced on `dt` (the capped frame time) rather than
       // raw delta, so a stalled frame cannot skip a whole shot — the intro is short enough
       // that a few milliseconds of drift across it are worth less than never jump-cutting.
       introElapsedRef.current += dt;
-      const overrun = introElapsedRef.current >= INTRO_DURATION;
-      const skipping = introSkipRequestedRef.current;
-      // A skip mid-weave should not drop the player straight into a city; wind on to the
-      // wheel shot and let the same hidden cut do the work it was built for.
-      if (skipping && introElapsedRef.current < introShotStart(INTRO_HANDOFF_SHOT)) {
-        introElapsedRef.current = introShotStart(INTRO_HANDOFF_SHOT);
-      }
-      // The one thing that cannot be hurried. Scene 3 holds on the wheel until the real
-      // world has actually arrived — the bolted shot is the same frame whether it runs for
-      // eight seconds or twenty, which is exactly why the handoff was put inside it. The
-      // road has a long run-out for this (see introStage's last segment), and if the load
-      // failed outright, introFailedRef ends the intro so the error curtain can be seen.
-      const worldReady = introPendingWorldRef.current !== null;
-      if (introFailedRef.current || ((overrun || skipping) && worldReady)) {
-        introHandoffRef.current();
+      if (introHoldsWorldRef.current) {
+        const overrun = introElapsedRef.current >= INTRO_DURATION;
+        const skipping = introSkipRequestedRef.current;
+        // A skip mid-weave should not drop the player straight into a city; wind on to the
+        // wheel shot and let the same hidden cut do the work it was built for.
+        if (skipping && introElapsedRef.current < introShotStart(INTRO_HANDOFF_SHOT)) {
+          introElapsedRef.current = introShotStart(INTRO_HANDOFF_SHOT);
+        }
+        // The one thing that cannot be hurried. Scene 3 holds on the wheel until the real
+        // world has arrived — the bolted shot is the same frame whether it runs for eight
+        // seconds or twenty, which is exactly why the handoff was put inside it. The road
+        // has a long run-out for this (see introStage's last segment), and if the load
+        // failed outright, introFailedRef ends the intro so the error curtain can be seen.
+        const worldReady = introPendingWorldRef.current !== null;
+        if (introFailedRef.current || ((overrun || skipping) && worldReady)) {
+          introHandoffRef.current();
+        }
+      } else if (!building) {
+        // The world was swapped some frames ago and has now finished assembling. This is
+        // the moment the shot has been covering for, and the only safe one to leave it on.
+        introReleaseRef.current();
       }
     }
 
@@ -3743,7 +3807,7 @@ function WorldScene({
     // dropped frame leaves the fire exactly where it would have been.
     campRef.current?.update(state.clock.elapsedTime, nightFactorRef.current);
 
-    if (introHoldsWorldRef.current && bus) {
+    if (introHoldsCameraRef.current) {
       // The cinematic's own camera. First in the chain because it outranks everything: a
       // scripted shot is not a mode the player is in, it is the absence of player control.
       //
@@ -3758,11 +3822,14 @@ function WorldScene({
       // point. Unclamped, the hold would stop writing the camera and freeze the shot
       // wherever the last written frame left it.
       const at = introShotAt(Math.min(introElapsedRef.current, INTRO_DURATION - 1e-3));
-      if (at) {
-        const placement = resolveIntroShot(at.shot, at.local, {
-          position: bus.position,
-          heading: bus.rotation.y,
-        });
+      // Scene 1 is locked off and ignores the bus entirely, so it can play before
+      // loadBusShell has resolved rather than waiting on a model it never frames. The
+      // bus-relative shots do wait — and the wait leaves the camera untouched rather than
+      // falling through to the player's rig, which would ease a chase shot into the middle
+      // of a cutscene.
+      const busPose = bus ? { position: bus.position, heading: bus.rotation.y } : null;
+      if (at && (busPose || at.shot.kind === 'locked-off')) {
+        const placement = resolveIntroShot(at.shot, at.local, busPose ?? INTRO_PLACEHOLDER_POSE);
         state.camera.position.copy(placement.position);
         state.camera.lookAt(placement.lookAt);
         updateCameraFov(state.camera, placement.fov);
@@ -3897,7 +3964,7 @@ function WorldScene({
     // block and the intro branch above are its only writers — so there is nothing to
     // shadow it with. The intro is skipped here because each of its shots carries its own
     // focal length, which the player's FOV slider has no business overriding mid-cutscene.
-    if (!introHoldsWorldRef.current) updateCameraFov(state.camera, control.camera.fov);
+    if (!introHoldsCameraRef.current) updateCameraFov(state.camera, control.camera.fov);
 
     // Render budget: sampled every frame (cheap), but the (possibly expensive)
     // buildings-visibility re-scan is throttled — except right after a budget change,
@@ -4264,7 +4331,7 @@ function SvartaksiScene({
   onReady,
 }: {
   control: RuntimeControl;
-  callbacks: Pick<RuntimeOptions, 'onStatus' | 'onSpeed' | 'onFps' | 'onArea' | 'onNearby' | 'onMode' | 'onCameraMode' | 'onHint' | 'onSpeech' | 'onInspection'>;
+  callbacks: Pick<RuntimeOptions, 'onStatus' | 'onSpeed' | 'onFps' | 'onArea' | 'onNearby' | 'onMode' | 'onCameraMode' | 'onHint' | 'onSpeech' | 'onInspection' | 'onIntro'>;
   onReady: (api: SceneApi) => void;
 }) {
   const [shadowsEnabled, setShadowsEnabled] = useState(true);
@@ -4309,7 +4376,7 @@ function SvartaksiScene({
   );
 }
 
-export function createSvartaksiRuntime({ host, onStatus, onSpeed, onFps, onArea, onNearby, onMode, onCameraMode, onHint, onSpeech, onInspection }: RuntimeOptions): SvartaksiRuntime {
+export function createSvartaksiRuntime({ host, onStatus, onSpeed, onFps, onArea, onNearby, onMode, onCameraMode, onHint, onSpeech, onInspection, onIntro }: RuntimeOptions): SvartaksiRuntime {
   // Read once per runtime rather than per use, so a URL change mid-session cannot leave
   // the intro half-enabled. See isIntroRequested for why `?intro=0` exists at all.
   const introEnabled = isIntroRequested(window.location.search);
@@ -4334,7 +4401,7 @@ export function createSvartaksiRuntime({ host, onStatus, onSpeed, onFps, onArea,
     input: createPlayerInputController(),
     inputPaused: false,
   };
-  const callbacks = { onStatus, onSpeed, onFps, onArea, onNearby, onMode, onCameraMode, onHint, onSpeech, onInspection };
+  const callbacks = { onStatus, onSpeed, onFps, onArea, onNearby, onMode, onCameraMode, onHint, onSpeech, onInspection, onIntro };
   const performanceCaptureStart = createDeferredPerformanceCaptureStart();
   let sceneApi: SceneApi | null = null;
   let reactRoot: Root | null = null;

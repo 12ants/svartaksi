@@ -39,15 +39,20 @@ about. Nothing is explained.
    | 2 | Follow through the weave, drifting left to right and rising | `follow` | 16s | 38° |
    | 3 | Bolted to the bus, aimed forward, front wheel lower right | `bolted` | 8s | 52° |
 
-8. Scene 3 **holds past its duration** until the real world has arrived. It never cuts to
-   an unloaded world.
-9. At the handoff, in this order: adopt the real world; restore the clock; start a short
-   arrival ride toward the parked car; release input; return the camera to cockpit.
-10. If no drivable road is loaded near the car, the player is set down beside it on foot
+8. The gameplay HUD is masked for the duration. The player's own HUD preferences are not
+   changed, only hidden.
+9. Scene 3 **holds past its duration** until the real world has both arrived *and* finished
+   building. It never cuts to an unloaded or half-assembled world.
+10. The handoff is two steps:
+    - **Swap** (data has arrived): adopt the real world, restore the clock, re-ground the
+      parked car, start a short arrival ride toward it. Streaming resumes.
+    - **Release** (the rebuild has drained): return the camera to cockpit, restore input
+      and the HUD.
+11. If no drivable road is loaded near the car, the player is set down beside it on foot
     instead of being left aboard a bus with nowhere to go.
-11. If the real world load fails outright, the cinematic ends immediately so the error
+12. If the real world load fails outright, the cinematic ends immediately so the error
     curtain can be seen.
-12. Any keypress or pointer press skips. A skip before scene 3 winds forward to scene 3
+13. Any keypress or pointer press skips. A skip before scene 3 winds forward to scene 3
     rather than cutting out, so the hidden handoff still happens.
 
 ## Formulas
@@ -89,6 +94,9 @@ h_mid = h + (κ * step)/2;   x += sin(h_mid)*step;   z += cos(h_mid)*step;   h +
 |---|---|
 | Real world arrives before scene 3 | Held in `introPendingWorldRef`; adopted at the handoff, never mid-shot. |
 | Real world still loading when scene 3's 8s expire | Scene 3 holds on the wheel. The road has ~170m of run-out past the cinematic's end so the bus is not braking while it waits. |
+| Real world arrived but still assembling | The camera stays bolted until `world.pump` drains, so the city is never seen building. The build runs at the curtain's budget meanwhile. |
+| Bus model still loading on the first frame | Scene 1 plays anyway — it is locked off and never frames the bus. The camera is not handed to the player's rig in the meantime. |
+| Player's HUD regions were turned off already | Unchanged: the mask only hides, and restores whatever was set. |
 | Real world load fails | Intro ends at once; the normal retryable error curtain is shown. |
 | No bus-drivable road near the parked car | Arrival ride skipped; player set down on foot beside the taxi. |
 | Player skips during scene 1 or 2 | Clock winds to scene 3's start; handoff proceeds as normal. |
@@ -148,5 +156,8 @@ Manual (`production/qa/evidence/`, advisory):
 
 - [ ] No black frame and no camera pop at either cut.
 - [ ] The world swap inside scene 3 is not visible.
-- [ ] Control returns in the cockpit aboard a moving bus; the player alights beside the car.
+- [ ] Control returns in the cockpit aboard a moving bus; the player alights beside the car,
+      which is sitting *on* the road rather than buried in or floating above it.
+- [ ] The HUD is absent for the whole cinematic and back afterwards, in whatever
+      configuration it was in before.
 - [ ] `?intro=0` opens the game exactly as before.

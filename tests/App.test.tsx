@@ -31,6 +31,7 @@ const captured: {
     distance: number;
     direction: string;
   }>) => void;
+  onIntro?: (playing: boolean) => void;
 } = {};
 
 const runtime = {
@@ -85,6 +86,7 @@ vi.mock('../src/svartaksi/svartaksiRuntime', () => ({
     onFps: NonNullable<typeof captured.onFps>;
     onSpeed: NonNullable<typeof captured.onSpeed>;
     onNearby: NonNullable<typeof captured.onNearby>;
+    onIntro: NonNullable<typeof captured.onIntro>;
   }) => {
     captured.onStatus = options.onStatus;
     captured.onMode = options.onMode;
@@ -95,6 +97,7 @@ vi.mock('../src/svartaksi/svartaksiRuntime', () => ({
     captured.onFps = options.onFps;
     captured.onSpeed = options.onSpeed;
     captured.onNearby = options.onNearby;
+    captured.onIntro = options.onIntro;
     return runtime;
   }),
 }));
@@ -765,5 +768,59 @@ describe('Svartaksi', () => {
     expect(runtime.setInputSourceState).toHaveBeenLastCalledWith('touch', { boost: false });
     fireEvent(document, new Event('visibilitychange'));
     expect(runtime.releaseInputSource).toHaveBeenCalledWith('touch');
+  });
+});
+
+describe('the HUD during the opening cinematic', () => {
+  /** Puts App into the state it is in while the intro plays: world ready (the curtain is
+   * up), and the runtime reporting a cinematic in progress. */
+  function playIntro() {
+    render(<App />);
+    act(() => captured.onStatus?.({
+      source: 'maplibre',
+      phase: 'ready',
+      mode: 'initial',
+      progress: 1,
+      message: 'Gärdet / opening',
+      retryable: false,
+    }));
+    act(() => captured.onSpeed?.(42));
+  }
+
+  it('hides the gameplay chrome while the cinematic is playing', () => {
+    playIntro();
+    // Present before the cinematic is announced...
+    expect(screen.getByRole('button', { name: 'HUD visibility' })).toBeInTheDocument();
+
+    act(() => captured.onIntro?.(true));
+
+    // ...and gone during it. A speedometer over a cutscene gives the game away as a game.
+    expect(screen.queryByRole('button', { name: 'HUD visibility' })).not.toBeInTheDocument();
+  });
+
+  it('gives the HUD back when the cinematic hands over', () => {
+    playIntro();
+    act(() => captured.onIntro?.(true));
+    act(() => captured.onIntro?.(false));
+
+    expect(screen.getByRole('button', { name: 'HUD visibility' })).toBeInTheDocument();
+  });
+
+  it('leaves the loading curtain alone, so a failed load is still visible', () => {
+    playIntro();
+    act(() => captured.onIntro?.(true));
+    act(() => captured.onStatus?.({
+      source: 'maplibre',
+      phase: 'error',
+      mode: 'initial',
+      progress: 0,
+      message: 'Source unavailable',
+      retryable: true,
+    }));
+
+    // The cinematic masks the HUD, never the one overlay that reports the game is broken.
+    // Matched on the retry control rather than the message, which also appears in the
+    // screen-reader live region.
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
   });
 });
