@@ -97,7 +97,7 @@ export interface PierOptions {
    * A pier dropped into the road running under the viaduct is worse than no pier at all:
    * it is a concrete block in a live carriageway, and it is exactly where the underpass
    * the deck exists to cross is. */
-  isObstructed?: (x: number, z: number) => boolean;
+  isObstructed?: (x: number, z: number, deckUndersideY: number) => boolean;
   spacing?: number;
 }
 
@@ -234,12 +234,15 @@ export function pierPlacements(
   const placements: PierPlacement[] = [];
   const place = (target: number, kind: PierKind): void => {
     const sample = sampleAt(samples, target);
-    if (options.isObstructed?.(sample.x, sample.z)) return;
     const topY = sample.y - depthAt(target);
     const baseY = sample.y - sample.lift - PIER_FOOT_EMBED;
     // A support with no height is a flat plate at deck level; skip it rather than emit
     // inverted geometry. Can happen where a run's own boundary sits at the lift threshold.
     if (topY - baseY < 0.05) return;
+    // Asked after the deck underside is known rather than before, because whether
+    // something is in this support's way depends on how far under the deck it passes —
+    // see `createRoadObstructionTest`.
+    if (options.isObstructed?.(sample.x, sample.z, topY)) return;
     const { dirX, dirZ } = directionAt(samples, target);
     placements.push({
       kind, x: sample.x, z: sample.z, topY, baseY,
@@ -324,6 +327,26 @@ export function createPierMaterial(): THREE.MeshStandardMaterial {
 const OBSTRUCTION_CLEARANCE = PIER_HALF;
 
 /**
+ * How far below the deck's underside another road has to pass before a support standing
+ * there counts as being in its way, in metres.
+ *
+ * Without this the test was purely horizontal, and it rejected three supports in four.
+ * Measured over the committed Gärdet cache: of 184 rejected supports, 147 were rejected by
+ * a road whose surface sat 0.45m *above* the deck underside — which is the deck's own top
+ * face, one deck-thickness up. Those blockers were the viaduct's own continuation ways and
+ * the neighbouring carriageways on the same structure, none of which a support can
+ * possibly be standing in. Genuine underpasses clustered separately, around 4.5m below,
+ * with an almost empty gap between the two groups.
+ *
+ * The floor on the useful range is set by the shallowest deck that gets supports at all:
+ * at `MIN_PIER_LIFT` the underside sits only about a metre above the baseline, so a street
+ * running under it drops about that much. A quarter of a metre sits well clear of the
+ * same-level group and well under that floor, so it separates the two cases without
+ * needing either to be measured precisely.
+ */
+const MIN_UNDERPASS_DROP = 0.25;
+
+/**
  * Squared distance from a point to a segment. Squared throughout: this runs per candidate
  * road segment per support, and the comparison against a squared radius is exact.
  */
@@ -354,8 +377,16 @@ export function createRoadObstructionTest(
   roads: readonly WorldRoad[],
   excludeRoadId: string,
   deckPoints: readonly LocalPoint[],
+  /**
+   * That road's own surface height at a point, in metres. Injected rather than derived
+   * here because answering it needs the elevation profiles, which live a layer up — the
+   * same reason `isObstructed` is injected into `pierPlacements` rather than queried
+   * inside it. For a road with no profile the honest answer is its at-grade surface
+   * elevation, which is what makes an ordinary street under a viaduct read correctly.
+   */
+  surfaceHeightAt: (road: WorldRoad, x: number, z: number) => number,
   clearance: number = OBSTRUCTION_CLEARANCE,
-): (x: number, z: number) => boolean {
+): (x: number, z: number, deckUndersideY: number) => boolean {
   if (!deckPoints.length) return () => false;
   let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
   for (const point of deckPoints) {
@@ -382,13 +413,27 @@ export function createRoadObstructionTest(
   });
   if (!candidates.length) return () => false;
 
-  return (x: number, z: number): boolean => {
+  return (x: number, z: number, deckUndersideY: number): boolean => {
     for (const road of candidates) {
       const radius = road.width / 2 + clearance;
       const radiusSq = radius * radius;
+      let withinCarriageway = false;
       for (let index = 0; index < road.points.length - 1; index += 1) {
-        if (distanceSqToSegment(x, z, road.points[index], road.points[index + 1]) <= radiusSq) return true;
+        if (distanceSqToSegment(x, z, road.points[index], road.points[index + 1]) <= radiusSq) {
+          withinCarriageway = true;
+          break;
+        }
       }
+      if (!withinCarriageway) continue;
+      // Only now ask how high this road is. The height lookup is much the dearer half and
+      // nearly every candidate fails the distance test first, so asking in this order
+      // keeps the common case exactly as cheap as it was before heights were consulted.
+      //
+      // Standing near a road is not enough to be in its way: a viaduct is usually built
+      // along a corridor it shares with the street it crosses, and the deck's own
+      // continuation ways run directly along its line. Only a road that genuinely passes
+      // *beneath* this support can have the support standing in it.
+      if (surfaceHeightAt(road, x, z) <= deckUndersideY - MIN_UNDERPASS_DROP) return true;
     }
     return false;
   };

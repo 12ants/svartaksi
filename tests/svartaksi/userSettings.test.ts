@@ -78,7 +78,7 @@ describe('camera settings', () => {
   });
 
   it('keeps a saved camera framing across a reload', () => {
-    const camera = { distance: 1.4, pitch: 12, responsiveness: 0.8, fov: 62 };
+    const camera = { distance: 1.4, pitch: 12, responsiveness: 0.8, fov: 62, lookAhead: 0.6 };
     const storage = memoryStorage();
     saveUserSettings(storage, { ...DEFAULT_USER_SETTINGS, camera });
     expect(loadUserSettings(storage).camera).toEqual(camera);

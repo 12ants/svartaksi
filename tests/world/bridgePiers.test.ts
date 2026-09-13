@@ -114,7 +114,7 @@ describe('pierPlacements', () => {
     const { points, elevations, lifts } = deck(14, 8, () => 6);
     const all = pierPlacements(points, elevations, lifts, flat(14), WIDTH);
     const blocked = pierPlacements(points, elevations, lifts, flat(14), WIDTH, {
-      isObstructed: (x) => x > 40 && x < 60,
+      isObstructed: (x: number) => x > 40 && x < 60,
     });
     expect(blocked.length).toBe(all.length - 1);
     expect(xs(blocked)).not.toContain(52);
@@ -220,46 +220,80 @@ describe('createRoadObstructionTest', () => {
 
   const deckLine: LocalPoint[] = [{ x: 0, z: 0 }, { x: 100, z: 0 }];
 
-  it('reports a point sitting in another road as obstructed', () => {
-    // The underpass: a street crossing the deck's line at x=50.
+  /** The deck underside these tests ask about: a viaduct standing 6m up. */
+  const UNDERSIDE = 6;
+  /** Every road in the fixture is an ordinary street at grade unless said otherwise. */
+  const atGrade = () => 0;
+  /** Every road in the fixture is up on the deck alongside the viaduct. Its surface is
+   * one deck-thickness above the underside, which is where a continuation way sits. */
+  const atDeckLevel = () => UNDERSIDE + 0.45;
+
+  it('reports a point sitting in a road that passes underneath as obstructed', () => {
+    // The underpass: a street at grade crossing the deck's line at x=50.
     const crossing = road('under', [{ x: 50, z: -40 }, { x: 50, z: 40 }]);
-    const test = createRoadObstructionTest([crossing], 'deck', deckLine);
-    expect(test(50, 0)).toBe(true);
+    const test = createRoadObstructionTest([crossing], 'deck', deckLine, atGrade);
+    expect(test(50, 0, UNDERSIDE)).toBe(true);
     // Clear of it by more than half the carriageway plus the column's own clearance.
-    expect(test(20, 0)).toBe(false);
+    expect(test(20, 0, UNDERSIDE)).toBe(false);
+  });
+
+  it('keeps a support standing beside a road at the deck\'s own level', () => {
+    // The viaduct's own continuation way, or a neighbour up on the same structure. It
+    // runs straight along the deck's line, so the horizontal test alone rejects every
+    // support on the bridge — which is what left decks standing on nothing.
+    const continuation = road('deck-b', [{ x: 0, z: 0 }, { x: 100, z: 0 }]);
+    const test = createRoadObstructionTest([continuation], 'deck', deckLine, atDeckLevel);
+    expect(test(50, 0, UNDERSIDE)).toBe(false);
+  });
+
+  it('keeps an abutment where the deck hands over to its approach ramp', () => {
+    // The commonest case of the bug: an abutment stands exactly where the deck meets the
+    // ramp that carries it down, and that ramp is at deck level right there.
+    const ramp = road('ramp', [{ x: 95, z: 0 }, { x: 160, z: 0 }]);
+    const test = createRoadObstructionTest([ramp], 'deck', deckLine, atDeckLevel);
+    expect(test(100, 0, UNDERSIDE)).toBe(false);
+  });
+
+  it('still rejects a support on a road only just far enough under the deck', () => {
+    // A shallow deck: the street beneath clears the underside by less than a metre, and
+    // must still count. The margin has to sit below this or low underpasses lose it.
+    const under = road('low', [{ x: 50, z: -40 }, { x: 50, z: 40 }]);
+    const test = createRoadObstructionTest([under], 'deck', deckLine, () => 0);
+    expect(test(50, 0, 1.05)).toBe(true);
   });
 
   it('never reports the deck road against itself', () => {
     const self = road('deck', deckLine);
-    const test = createRoadObstructionTest([self], 'deck', deckLine);
-    expect(test(50, 0)).toBe(false);
+    const test = createRoadObstructionTest([self], 'deck', deckLine, atGrade);
+    expect(test(50, 0, UNDERSIDE)).toBe(false);
   });
 
   it('scales the exclusion zone with the obstructing road width', () => {
     const narrow = road('n', [{ x: 50, z: -40 }, { x: 50, z: 40 }], 4);
     const wide = road('w', [{ x: 50, z: -40 }, { x: 50, z: 40 }], 30);
     // 10m from the centreline: outside a 4m road, well inside a 30m one.
-    expect(createRoadObstructionTest([narrow], 'deck', deckLine)(60, 0)).toBe(false);
-    expect(createRoadObstructionTest([wide], 'deck', deckLine)(60, 0)).toBe(true);
+    expect(createRoadObstructionTest([narrow], 'deck', deckLine, atGrade)(60, 0, UNDERSIDE)).toBe(false);
+    expect(createRoadObstructionTest([wide], 'deck', deckLine, atGrade)(60, 0, UNDERSIDE)).toBe(true);
   });
 
   it('ignores roads nowhere near the deck', () => {
     const far = road('far', [{ x: 5_000, z: 5_000 }, { x: 5_100, z: 5_000 }]);
-    expect(createRoadObstructionTest([far], 'deck', deckLine)(50, 0)).toBe(false);
+    expect(createRoadObstructionTest([far], 'deck', deckLine, atGrade)(50, 0, UNDERSIDE)).toBe(false);
   });
 
   it('measures to the segment, not just its endpoints', () => {
     // A point beside the middle of a long segment is inside the road; the endpoint-only
     // test this replaces would have called it clear.
     const along = road('along', [{ x: 0, z: 3 }, { x: 100, z: 3 }]);
-    const test = createRoadObstructionTest([along], 'deck', deckLine);
-    expect(test(50, 0)).toBe(true);
+    const test = createRoadObstructionTest([along], 'deck', deckLine, atGrade);
+    expect(test(50, 0, UNDERSIDE)).toBe(true);
   });
 
   it('handles degenerate input without throwing', () => {
-    expect(createRoadObstructionTest([], 'deck', deckLine)(0, 0)).toBe(false);
-    expect(createRoadObstructionTest([road('r', deckLine)], 'deck', [])(0, 0)).toBe(false);
+    expect(createRoadObstructionTest([], 'deck', deckLine, atGrade)(0, 0, UNDERSIDE)).toBe(false);
+    expect(createRoadObstructionTest([road('r', deckLine)], 'deck', [], atGrade)(0, 0, UNDERSIDE)).toBe(false);
     // A single-point way has no segment to measure against.
-    expect(createRoadObstructionTest([road('p', [{ x: 50, z: 0 }])], 'deck', deckLine)(50, 0)).toBe(false);
+    expect(createRoadObstructionTest([road('p', [{ x: 50, z: 0 }])], 'deck', deckLine, atGrade)(50, 0, UNDERSIDE))
+      .toBe(false);
   });
 });

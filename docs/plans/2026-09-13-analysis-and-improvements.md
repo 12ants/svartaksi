@@ -94,4 +94,58 @@ matters" is the correct call.
 
 ## Proposed slice: camera look-ahead into turns
 
-See the ADR filed alongside this document for the design and its rationale.
+See `docs/architecture/2026-09-13-camera-corner-lead.md` for the design and its rationale.
+
+## Addendum: bridges render without supports
+
+Investigated after the analysis above, on a report that bridges looked wrong.
+
+### How it was investigated
+
+This project has no browser layer, so the evidence is not a screenshot. The committed
+`vendor/worldcache` tiles were decoded with `decodeVectorTile`, normalised with
+`normalizeMapLibreFeatures`, and run through the real elevation-profile and pier-placement
+code headlessly — the whole pipeline up to the point where it would hand geometry to
+three.js. That turns "bridges look wrong" into counts.
+
+It is worth noting the technique. A world built from real data can be measured without
+being rendered, and doing so caught a defect that 1550 passing unit tests did not, because
+every one of those tests uses a hand-built fixture that happens to avoid the case.
+
+### What was found
+
+Within 700m of the origin, 94 roads are elevated enough to want supports. **68 of them —
+72% — got no support at all.** Their decks are exactly the "decal floating over the city"
+the pier module was written to prevent.
+
+The cause was `createRoadObstructionTest`. It asks whether a support stands inside another
+road's carriageway, and it asked that purely horizontally: it never consulted how high the
+other road was. A road at the deck's own level therefore counted as something to keep out
+of — and that is the common case, not a corner one, because a viaduct's OSM way is one of
+several carrying the same structure and an abutment by construction stands where the deck
+meets its approach ramp.
+
+Of 184 rejected supports, 147 were rejected by a road sitting 0.45m *above* the deck
+underside — one deck-thickness, i.e. the deck's own top face. 168 of the 184 were
+abutments. Genuine underpasses formed a separate cluster around 4.5m below, with an almost
+empty gap between the two groups, which is what made the fix's threshold a measurement
+rather than a guess.
+
+Fixed by giving the test the deck underside and each candidate's own surface height, and
+rejecting only a road that genuinely passes beneath. Same measurement afterwards: 215
+supports instead of 69, one unsupported road instead of 68, and all 20 rejections that were
+real underpasses preserved.
+
+### What was reported but did not reproduce
+
+**Piers floating over water or buried in rising ground.** This is a real documented
+limitation — `PIER_FOOT_EMBED` sinks a foot 0.6m below the road's *baseline*, never a
+terrain sample — but it does not currently manifest. Across the whole cached city every
+pier foot sits between 0.42m and 1.55m below the terrain under it: always embedded, never
+hanging, and not one standing inside a water polygon. The limitation is latent, and the
+0.6m nominal embed is what most of that spread is. Worth fixing when a bridge over open
+water is actually reachable; not the cause of anything visible now.
+
+**Road vanishing at a bridge, and z-fighting.** Not investigated. Both were reported but
+neither has been reproduced or measured, and neither follows from the defect above. They
+need a location in the world to look at before there is anything to measure.
