@@ -84,9 +84,41 @@ describe('orderWheels', () => {
   });
 });
 
+/**
+ * Every mesh of `saab90.glb`, with its size in car space.
+ *
+ * These are measurements, not examples: each is the accessor bounds of one node, carried
+ * through that node's own transform and then `orientToCarSpace`. The earlier version of
+ * this suite invented its panels instead — and invented a *tall* one, which the old test
+ * caught — while the asset's real trim strips are thin, which it did not. The whole file
+ * then passed against a car that never loaded. Re-measure with the glTF accessor bounds if
+ * the asset is re-exported.
+ */
+const SAAB_MESHES: readonly { name: string; size: readonly [number, number, number]; axle: boolean }[] = [
+  { name: 'Box012 — body', size: [1.977, 1.310, 4.906], axle: false },
+  { name: 'Cylinder007 — rear axle', size: [1.942, 0.718, 0.718], axle: true },
+  { name: 'Box014 — window surround', size: [1.950, 0.146, 0.123], axle: false },
+  { name: 'Box015 — front blade', size: [0.583, 0.136, 0.014], axle: false },
+  { name: 'Box016 — rear blade', size: [1.367, 0.117, 0.293], axle: false },
+  { name: 'Box017 — rear sill', size: [0.583, 0.136, 0.014], axle: false },
+  { name: 'Cylinder008 — front axle', size: [1.942, 0.718, 0.718], axle: true },
+];
+
 describe('isAxleGeometry', () => {
-  it('recognises an axle: a bar across the car, no taller than a wheel', () => {
-    expect(isAxleGeometry(box(1.94, 0.72, 0.72))).toBe(true);
+  for (const mesh of SAAB_MESHES) {
+    it(`${mesh.axle ? 'finds the axle in' : 'leaves the body alone for'} ${mesh.name}`, () => {
+      expect(isAxleGeometry(box(...mesh.size))).toBe(mesh.axle);
+    });
+  }
+
+  /* The failure this whole rule exists to prevent. Anything but two axles means five or
+   * more wheel parts, orderWheels throws, and the session drives the stand-in box. */
+  it('finds exactly two axles in the asset, since four wheels have to come out of them', () => {
+    const axles = SAAB_MESHES.filter((mesh) => isAxleGeometry(box(...mesh.size)));
+    expect(axles.map((mesh) => mesh.name)).toEqual([
+      'Cylinder007 — rear axle',
+      'Cylinder008 — front axle',
+    ]);
   });
 
   it('does not mistake a body panel for one', () => {
