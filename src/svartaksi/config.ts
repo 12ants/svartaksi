@@ -48,6 +48,28 @@ export const START_LOCATION = {
 export const START_LOCATION_NAME = 'Gärdet';
 
 /**
+ * Query parameter that turns the opening cinematic off: `?intro=0`.
+ *
+ * The intro is a fixed thirty-odd seconds before control, which is the right shape for a
+ * player opening the game once and the wrong shape for a developer reloading it two
+ * hundred times an afternoon. Rather than a build flag nobody remembers to flip, it is a
+ * URL the dev server can be bookmarked at.
+ */
+export const INTRO_QUERY_PARAMETER = 'intro';
+
+/**
+ * Whether to play the opening cinematic for this session.
+ *
+ * Anything but an explicit `0`/`off`/`false` plays it, so a malformed parameter shows the
+ * player the intro rather than silently skipping the opening of the game.
+ */
+export function isIntroRequested(search: string): boolean {
+  const value = new URLSearchParams(search).get(INTRO_QUERY_PARAMETER);
+  if (value === null) return true;
+  return !['0', 'off', 'false', 'no'].includes(value.toLowerCase());
+}
+
+/**
  * How far each world-data category is polled from, per WorldDataProvider.load. Roads and
  * terrain (parks/water) fetch from a much wider area than buildings — they read fine from
  * a distance and matter over a longer driving/visible range, while buildings are the

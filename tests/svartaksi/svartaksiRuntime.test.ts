@@ -33,7 +33,7 @@ function createSceneApi() {
     applyTeleport: vi.fn(), applySpawnRandomPlace: vi.fn(() => false),
     applyStartBusRide: vi.fn(), applyStopBusRide: vi.fn(), applyToggleVehicle: vi.fn(),
     retryWorldLoad: vi.fn(), startPerformanceCapture: vi.fn(), snapshotPerformanceCapture: vi.fn(),
-    stopPerformanceCapture: vi.fn(), setPerfVisible: vi.fn(),
+    stopPerformanceCapture: vi.fn(), setPerfVisible: vi.fn(), startIntro: vi.fn(),
   };
 }
 
@@ -110,6 +110,21 @@ describe('runtime performance capture readiness', () => {
     renderedSceneReady()(api);
 
     expect(api.startPerformanceCapture).toHaveBeenCalledTimes(1);
+    runtime.dispose();
+  });
+
+  it('opens the cinematic once the scene API is ready, and only after the clock is set', async () => {
+    const runtime = createRuntime();
+
+    await Promise.resolve();
+    const api = createSceneApi();
+    renderedSceneReady()(api);
+
+    expect(api.startIntro).toHaveBeenCalledTimes(1);
+    // The intro forces its own dusk; a replayed applyTimeOfDay landing after it would put
+    // the session's clock back over the top of the scene's.
+    expect(api.applyTimeOfDay.mock.invocationCallOrder[0])
+      .toBeLessThan(api.startIntro.mock.invocationCallOrder[0]);
     runtime.dispose();
   });
 
