@@ -725,6 +725,19 @@ export default function App() {
               <output>{Math.round(camera.responsiveness * 100)}%</output>
             </label>
             <label className="render-slider">
+              {/* 0 is exactly off, which is this feature's reduced-motion control — see
+                  cameraSettings.ts's `lookAhead`. */}
+              <span>Corner lead</span>
+              <input
+                type="range"
+                aria-label="Camera corner lead"
+                {...CAMERA_SETTING_BOUNDS.lookAhead}
+                value={camera.lookAhead}
+                onChange={(event) => updateCamera({ lookAhead: Number(event.target.value) })}
+              />
+              <output>{camera.lookAhead === 0 ? 'Off' : `${camera.lookAhead.toFixed(2)}x`}</output>
+            </label>
+            <label className="render-slider">
               <span>Field of view</span>
               <input
                 type="range"

@@ -1,8 +1,8 @@
 /**
- * The four camera dials a player can actually turn: what they are, what range each may
- * take, and how to read a set of them back out of untrusted storage.
+ * The camera dials a player can actually turn: what they are, what range each may take,
+ * and how to read a set of them back out of untrusted storage.
  *
- * Deliberately *not* four more numbers in `cameraRig.ts`'s per-body rigs. Those rigs exist
+ * Deliberately *not* a handful more numbers in `cameraRig.ts`'s per-body rigs. Those rigs exist
  * because a framing tuned around a 4.25m car frames mostly empty street around a 1.7m
  * pill, and there are four of them (vehicle, foot, horse, bus interior) with more likely
  * to follow. A preference expressed as absolute metres would have to be re-stated for
@@ -36,6 +36,16 @@ export interface CameraSettings {
   responsiveness: number;
   /** Vertical field of view, in degrees. */
   fov: number;
+  /**
+   * How hard the follow camera leads a corner — a multiplier on the predicted lead in
+   * `cameraLookAhead.ts`, where 1 is the shipped strength and 0 is off.
+   *
+   * Zero is exactly off rather than nearly off, which is what lets this one dial also be
+   * the reduced-motion control: a player who finds an anticipating camera uncomfortable
+   * drags it to the bottom and the aim goes back to pointing exactly where the body
+   * points, as it did before this existed.
+   */
+  lookAhead: number;
 }
 
 /**
@@ -47,6 +57,7 @@ export const CAMERA_SETTING_BOUNDS = {
   pitch: { min: -20, max: 45, step: 1 },
   responsiveness: { min: 0, max: 1, step: 0.01 },
   fov: { min: 35, max: 95, step: 1 },
+  lookAhead: { min: 0, max: 2, step: 0.05 },
 } as const satisfies Record<keyof CameraSettings, { min: number; max: number; step: number }>;
 
 export const DEFAULT_CAMERA_SETTINGS: CameraSettings = {
@@ -55,6 +66,10 @@ export const DEFAULT_CAMERA_SETTINGS: CameraSettings = {
   // 0.5 lands exactly on CAMERA.easeTau — see cameraEaseTau.
   responsiveness: 0.5,
   fov: 48,
+  // On by default, at the strength cameraLookAhead.ts's constants were chosen for: under
+  // a metre of lead through ordinary town cornering, which reads as the corner opening up
+  // rather than as the camera moving.
+  lookAhead: 1,
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -78,6 +93,7 @@ export function normalizeCameraSettings(raw: unknown): CameraSettings {
     pitch: readSetting(input, 'pitch'),
     responsiveness: readSetting(input, 'responsiveness'),
     fov: readSetting(input, 'fov'),
+    lookAhead: readSetting(input, 'lookAhead'),
   };
 }
 
