@@ -3546,7 +3546,7 @@ function WorldScene({
       // mode, and paying the cap here made the look rate silently frame-rate dependent:
       // below 20fps every frame is clamped to 50ms of turn however long it really took,
       // so on a slow machine holding a look key for six seconds turned the view a small
-      // fraction of the radians per second FREECAM.lookSpeed promises. (docs/TODO.md
+      // fraction of the radians per second FREECAM.lookSpeed promises. (An earlier guess
       // blamed the yaw/pitch refs being re-seeded every frame; they are not — the seed is
       // guarded by freecamSeedPendingRef and runs once per entry into the mode.)
       // Still bounded, because a multi-second stall should not spin the view: the bound

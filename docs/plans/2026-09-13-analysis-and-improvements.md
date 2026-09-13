@@ -146,6 +146,27 @@ hanging, and not one standing inside a water polygon. The limitation is latent, 
 0.6m nominal embed is what most of that spread is. Worth fixing when a bridge over open
 water is actually reachable; not the cause of anything visible now.
 
-**Road vanishing at a bridge, and z-fighting.** Not investigated. Both were reported but
-neither has been reproduced or measured, and neither follows from the defect above. They
-need a location in the world to look at before there is anything to measure.
+**Road vanishing at a bridge, and z-fighting.** Both have now been measured, over 831
+roads within 900m of the origin, and neither reproduces.
+
+*Vanishing road.* `surfaceVisibility` hides exactly one thing: a `tunnel`. 50 roads in the
+sample are hidden, all 50 of them tunnel-tagged, and only 4 of those lie within 25m of any
+bridge. There is no mechanism left by which a bridge removes a road from the scene — the
+negative-`layer` underpass case that used to do it was already fixed on 2026-09-09.
+
+*Z-fighting.* Of 268 crossings carrying grade-separation evidence, 58 involve two visible
+roads. 30 of those 58 resolve to within 5cm of each other, which sounds alarming and is
+not: **all 30 are crossings of two roads of the same class**, which is precisely the case
+`roadRenderOrder` already resolves by pinning each road to its own draw slot, making the
+winner camera-independent. Two different classes are separated by `ROAD_CLASS_STEP` by
+construction and none appeared within 5cm.
+
+26 of the 30 are a bridge's own touchdown — a footbridge ramping back to grade to join the
+path network, where being at the same height is the correct answer rather than a defect.
+The remaining 4 are flat crossings in the *middle* of a bridge span, which is a genuine
+modelling oddity but still same-class and so still not a depth fight. Left alone: fixing 4
+mid-span path crossings is not worth changing a resolution rule that is right 264 times.
+
+A false lead worth recording: bridges of kind `path` looked like they might be failing to
+lift at all. They are not — measured lift for the 17 path bridges is 1.42m minimum, 4.97m
+median, 9.10m maximum. The apparent flatness was entirely the touchdown effect above.

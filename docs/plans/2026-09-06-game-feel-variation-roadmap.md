@@ -43,8 +43,13 @@ those presentation systems should invent separate vehicle physics.
 
 First thin slice:
 
-- ease steering sensitivity with speed while preserving direct low-speed manoeuvring;
-- add a small configurable camera look-ahead into turns and a separately configurable
+- ~~ease steering sensitivity with speed while preserving direct low-speed manoeuvring~~ —
+  **already implemented before this roadmap was written**, in `applyCarControls`
+  (`src/svartaksi/carPhysics.ts`), where the steering limit falls away with speed and the
+  file header documents it as the one deliberate departure from realism. Recorded here
+  2026-09-13 because the bullet reads as outstanding work and invites re-implementation;
+- ~~add a small configurable camera look-ahead into turns~~ (**done** 2026-09-13 — see
+  `docs/architecture/2026-09-13-camera-corner-lead.md`) and a separately configurable
   impact impulse, with reduced-motion disabling both;
 - acknowledge traction loss, hard braking, indicators, doors, and surface changes with
   restrained sound and visual feedback;
