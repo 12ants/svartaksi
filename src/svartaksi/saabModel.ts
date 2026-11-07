@@ -79,15 +79,22 @@ export function orientToCarSpace(): THREE.Matrix4 {
 export interface SaabShell {
   /** Every non-wheel mesh, merged into one child group in car space. */
   body: THREE.Group;
-  /** Front-left, front-right, rear-left, rear-right — the order `carPhysics` builds its
-   * struts in, so index i is the same wheel in both. */
+  /** Front-right, front-left, rear-right, rear-left — the order `carPhysics` builds its
+   * struts in, so index i is the same wheel in both. See `orderWheels`. */
   wheels: [SplitPart, SplitPart, SplitPart, SplitPart];
   /** The half-track actually measured from the split wheels, which is what the visible
    * wheels are placed at. */
   halfTrack: number;
 }
 
-/** Sorts four wheel parts into front-left, front-right, rear-left, rear-right. */
+/**
+ * Sorts four wheel parts into front-right, front-left, rear-right, rear-left.
+ *
+ * Front first (descending z), then ascending x — and +x is the car's *left* in a frame
+ * that faces +Z with +Y up, so ascending x is right-then-left. `carModel` builds its hubs
+ * from the same ascending-x pair, so index i is the same corner in both; the order is
+ * named here only so nobody has to re-derive the handedness to read it.
+ */
 export function orderWheels(parts: SplitPart[]): [SplitPart, SplitPart, SplitPart, SplitPart] {
   if (parts.length !== 4) {
     throw new Error(`expected 4 wheels from the Saab's two axles, got ${parts.length}`);
@@ -174,8 +181,32 @@ export function mergePanels(meshes: THREE.Mesh[]): THREE.Mesh[] {
 }
 
 /**
- * Whether a geometry is one of the axles: a bar lying across the car, wider in x than it
- * is long in z. Every body panel of a saloon is the other way round.
+ * Whether a geometry is one of the axles: a bar lying across the car whose cross-section
+ * is a wheel.
+ *
+ * "Wider in x than it is long in z" is necessary but nowhere near sufficient, and
+ * believing it was is what kept the Saab off the road. Four of this asset's six meshes are
+ * trim strips — the window surround, the two bumper blades, the sill — and a trim strip is
+ * exactly the same shape as an axle in plan view: it spans the car and it is shallow. They
+ * differ only in section. Measured in car space, the asset reads:
+ *
+ *     Box012  body    1.977 x 1.310 x 4.906
+ *     Cyl007  axle    1.942 x 0.718 x 0.718     <- wheels
+ *     Box014  trim    1.950 x 0.146 x 0.123
+ *     Box015  trim    0.583 x 0.136 x 0.014
+ *     Box016  trim    1.367 x 0.117 x 0.293
+ *     Box017  trim    0.583 x 0.136 x 0.014
+ *     Cyl008  axle    1.942 x 0.718 x 0.718     <- wheels
+ *
+ * So the test is on the section, not the plan: an axle is a solid of revolution, so it is
+ * as tall as it is long and both are a tyre diameter. The trim strips are an order of
+ * magnitude thinner than that (0.117–0.146 against 0.718) and the body is six times too
+ * long, which leaves the two cylinders alone — with a fourfold margin on the nearest
+ * impostor, so a re-export that moves a strip a centimetre cannot flip the answer.
+ *
+ * Getting this wrong is not a cosmetic failure. Every extra "axle" is split into parts and
+ * added to the wheel list, `orderWheels` refuses a car that did not come apart into four,
+ * and `loadSaabShell` rejects — leaving the runtime's catch to keep the stand-in box.
  */
 export function isAxleGeometry(geometry: THREE.BufferGeometry): boolean {
   geometry.computeBoundingBox();
@@ -183,5 +214,9 @@ export function isAxleGeometry(geometry: THREE.BufferGeometry): boolean {
   if (!box) return false;
   const size = new THREE.Vector3();
   box.getSize(size);
-  return size.x > size.z * 1.5 && size.y < SAAB_DIMENSIONS.wheelRadius * 2.4;
+  // ±20% of the measured tyre diameter: loose enough for a re-export that remodels the
+  // tread, tight enough that nothing else on this car is round at anything like this size.
+  const diameter = SAAB_DIMENSIONS.wheelRadius * 2;
+  const isWheelSection = (span: number) => span > diameter * 0.8 && span < diameter * 1.2;
+  return size.x > size.z * 1.5 && isWheelSection(size.y) && isWheelSection(size.z);
 }

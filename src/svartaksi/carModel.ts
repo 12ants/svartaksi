@@ -41,7 +41,8 @@ export const CAR_HALF_WHEELBASE = SAAB_HALF_WHEELBASE;
 export interface CarModel {
   group: THREE.Group;
   /**
-   * The four wheels: front-left, front-right, rear-left, rear-right. Each is a group
+   * The four wheels: front-right, front-left, rear-right, rear-left — ascending x within
+   * each axle, and +x is the car's left in this frame (+Z forward, +Y up). Each is a group
    * whose transform the suspension writes every frame — its local y is where the strut
    * has travelled to, its rotation the steering and the roll. Ordered to match the
    * physics vehicle's wheel list exactly, so index i is the same wheel in both.
